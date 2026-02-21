@@ -190,6 +190,82 @@ app.delete('/api/calendar/:id', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Waitlist ──────────────────────────────────────────────────────────────────
+
+app.get('/api/centers/:centerId/waitlist', requireAuth, requireCenterAccess, (req, res) => {
+  res.json(db.prepare('SELECT * FROM waitlist_entries WHERE center_id = ? ORDER BY signed_up_at DESC').all(req.params.centerId));
+});
+
+app.post('/api/centers/:centerId/waitlist', requireAuth, requireAdmin, (req, res) => {
+  const { child_name, date_of_birth, desired_enrollment_time, parent_name, phone, email, notes, last_contact, signed_up_at, heard_about_us } = req.body;
+  if (!child_name?.trim()) return res.status(400).json({ error: 'Child name is required' });
+  const r = db.prepare(`
+    INSERT INTO waitlist_entries (center_id, child_name, date_of_birth, desired_enrollment_time, parent_name, phone, email, notes, last_contact, signed_up_at, heard_about_us)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+  `).run(req.params.centerId, child_name.trim(), date_of_birth||null, desired_enrollment_time||null, parent_name||null, phone||null, email||null, notes||null, last_contact||null, signed_up_at||new Date().toISOString().split('T')[0], heard_about_us||null);
+  res.status(201).json(db.prepare('SELECT * FROM waitlist_entries WHERE id = ?').get(r.lastInsertRowid));
+});
+
+app.put('/api/centers/:centerId/waitlist/:id', requireAuth, requireAdmin, (req, res) => {
+  const { child_name, date_of_birth, desired_enrollment_time, parent_name, phone, email, notes, last_contact, signed_up_at, heard_about_us } = req.body;
+  db.prepare(`UPDATE waitlist_entries SET child_name=?,date_of_birth=?,desired_enrollment_time=?,parent_name=?,phone=?,email=?,notes=?,last_contact=?,signed_up_at=?,heard_about_us=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND center_id=?`)
+    .run(child_name, date_of_birth||null, desired_enrollment_time||null, parent_name||null, phone||null, email||null, notes||null, last_contact||null, signed_up_at, heard_about_us||null, req.params.id, req.params.centerId);
+  res.json(db.prepare('SELECT * FROM waitlist_entries WHERE id = ?').get(req.params.id));
+});
+
+app.delete('/api/centers/:centerId/waitlist/:id', requireAuth, requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM waitlist_entries WHERE id = ? AND center_id = ?').run(req.params.id, req.params.centerId);
+  res.json({ ok: true });
+});
+
+// Email senders (for waitlist email intake)
+app.get('/api/email-senders', requireAuth, requireAdmin, (req, res) => {
+  res.json(db.prepare('SELECT es.*, c.name as center_name FROM email_senders es JOIN centers c ON c.id = es.center_id ORDER BY es.name').all());
+});
+
+app.post('/api/email-senders', requireAuth, requireAdmin, (req, res) => {
+  const { email, name, center_id } = req.body;
+  if (!email || !name || !center_id) return res.status(400).json({ error: 'Email, name, and center required' });
+  try {
+    const r = db.prepare('INSERT INTO email_senders (email, name, center_id) VALUES (?,?,?)').run(email.trim().toLowerCase(), name.trim(), center_id);
+    res.json(db.prepare('SELECT es.*, c.name as center_name FROM email_senders es JOIN centers c ON c.id = es.center_id WHERE es.id = ?').get(r.lastInsertRowid));
+  } catch { res.status(409).json({ error: 'That email is already an approved sender' }); }
+});
+
+app.put('/api/email-senders/:id', requireAuth, requireAdmin, (req, res) => {
+  const { active } = req.body;
+  if (active !== undefined) db.prepare('UPDATE email_senders SET active = ? WHERE id = ?').run(active ? 1 : 0, req.params.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/email-senders/:id', requireAuth, requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM email_senders WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Internal email intake (no user auth — used by email processor script)
+app.post('/api/email-intake', (req, res) => {
+  const { secret, sender_email, entry } = req.body;
+  if (secret !== process.env.INTERNAL_SECRET) return res.status(403).json({ error: 'Forbidden' });
+  const sender = db.prepare('SELECT * FROM email_senders WHERE email = ? AND active = 1').get(sender_email?.toLowerCase());
+  if (!sender) return res.status(403).json({ error: 'Sender not authorized' });
+  const { child_name, date_of_birth, desired_enrollment_time, parent_name, phone, email, notes, heard_about_us } = entry;
+  if (!child_name?.trim()) return res.status(400).json({ error: 'Child name is required' });
+  const r = db.prepare(`INSERT INTO waitlist_entries (center_id, child_name, date_of_birth, desired_enrollment_time, parent_name, phone, email, notes, signed_up_at, heard_about_us) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(sender.center_id, child_name.trim(), date_of_birth||null, desired_enrollment_time||null, parent_name||null, phone||null, email||null, notes||`Added via email from ${sender.name}`, new Date().toISOString().split('T')[0], heard_about_us||null);
+  db.prepare("UPDATE email_senders SET last_used = datetime('now') WHERE id = ?").run(sender.id);
+  res.status(201).json(db.prepare('SELECT * FROM waitlist_entries WHERE id = ?').get(r.lastInsertRowid));
+});
+
+// Internal: check sender auth
+app.post('/api/email-senders/check', (req, res) => {
+  const { email, secret } = req.body;
+  if (secret !== process.env.INTERNAL_SECRET) return res.status(403).json({ error: 'Forbidden' });
+  const sender = db.prepare('SELECT es.*, c.name as center_name FROM email_senders es JOIN centers c ON c.id = es.center_id WHERE es.email = ? AND es.active = 1').get(email?.toLowerCase());
+  if (!sender) return res.status(404).json({ error: 'Not approved' });
+  res.json(sender);
+});
+
 // ─── Competitive Analysis ─────────────────────────────────────────────────────
 
 app.get('/api/competitors', requireAuth, (req, res) => {
@@ -337,4 +413,15 @@ if (fs.existsSync(FRONTEND_BUILD)) {
   });
 }
 
-app.listen(PORT, () => console.log(`OMH Portal running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`OMH Portal running on port ${PORT}`);
+  // Auto-seed data on first run
+  const calendarCount = db.prepare('SELECT COUNT(*) as n FROM calendar_events').get().n;
+  if (calendarCount === 0) {
+    try { require('./seed-calendar'); console.log('✓ Auto-seeded calendar'); } catch(e) { console.warn('Calendar seed error:', e.message); }
+  }
+  const menuCount = db.prepare('SELECT COUNT(*) as n FROM weekly_menus').get().n;
+  if (menuCount === 0) {
+    try { require('./seed-menus'); console.log('✓ Auto-seeded menus'); } catch(e) { console.warn('Menu seed error:', e.message); }
+  }
+});

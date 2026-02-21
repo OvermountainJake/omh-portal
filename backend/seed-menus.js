@@ -94,7 +94,7 @@ const menus = [
 
 // Check if already seeded
 const existing = db.prepare('SELECT COUNT(*) as n FROM weekly_menus WHERE center_id = ?').get(CENTER_ID).n;
-if (existing > 0) { console.log(`Already have ${existing} menus, skipping seed`); process.exit(0); }
+if (existing > 0) { console.log(`Already have ${existing} menus, skipping seed`); module.exports = {}; return; }
 
 const insertMenu = db.prepare('INSERT INTO weekly_menus (center_id, week_label, week_start, week_end) VALUES (?,?,?,?)');
 const insertItem = db.prepare('INSERT INTO menu_items (menu_id, day_of_week, meal_type, items) VALUES (?,?,?,?)');

@@ -96,6 +96,33 @@ db.exec(`
     UNIQUE(ingredient_id, vendor_id, center_id)
   );
 
+  CREATE TABLE IF NOT EXISTS waitlist_entries (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    center_id               INTEGER NOT NULL REFERENCES centers(id) ON DELETE CASCADE,
+    child_name              TEXT NOT NULL,
+    date_of_birth           TEXT,
+    desired_enrollment_time TEXT,
+    parent_name             TEXT,
+    phone                   TEXT,
+    email                   TEXT,
+    notes                   TEXT,
+    last_contact            TEXT,
+    signed_up_at            TEXT DEFAULT (date('now')),
+    heard_about_us          TEXT,
+    created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS email_senders (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    email      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    name       TEXT NOT NULL,
+    center_id  INTEGER NOT NULL REFERENCES centers(id) ON DELETE CASCADE,
+    active     INTEGER NOT NULL DEFAULT 1,
+    last_used  TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS competitors (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     center_id         INTEGER REFERENCES centers(id) ON DELETE CASCADE,

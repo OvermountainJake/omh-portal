@@ -4,7 +4,7 @@ import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
 import Dashboard from './apps/Dashboard'
 import CalendarApp from './apps/CalendarApp'
-import WaitlistStub from './apps/WaitlistStub'
+import WaitlistApp from './apps/WaitlistApp'
 import HandbookApp from './apps/HandbookApp'
 import UsersApp from './apps/UsersApp'
 import FoodPricingApp from './apps/FoodPricingApp'
@@ -28,7 +28,7 @@ function AppRoutes() {
     <Layout>
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/waitlist" element={<WaitlistStub />} />
+        <Route path="/waitlist" element={<WaitlistApp />} />
         <Route path="/calendar" element={<CalendarApp />} />
         <Route path="/handbook" element={<HandbookApp />} />
         <Route path="/compliance" element={<ComingSoon title="Teacher Compliance" desc="Track teacher certifications, training, and regulatory compliance." icon="ShieldCheck" />} />
