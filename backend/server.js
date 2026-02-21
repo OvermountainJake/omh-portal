@@ -190,6 +190,125 @@ app.delete('/api/calendar/:id', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Competitive Analysis ─────────────────────────────────────────────────────
+
+app.get('/api/competitors', requireAuth, (req, res) => {
+  const { center_id } = req.query;
+  const rows = center_id
+    ? db.prepare('SELECT * FROM competitors WHERE center_id = ? ORDER BY is_ours DESC, name ASC').all(center_id)
+    : db.prepare('SELECT * FROM competitors ORDER BY is_ours DESC, name ASC').all();
+  res.json(rows.map(r => ({ ...r, is_ours: !!r.is_ours, rates: JSON.parse(r.rates_json || '{}') })));
+});
+
+app.post('/api/competitors', requireAuth, requireAdmin, (req, res) => {
+  const { name, city, state, zip, is_ours, youngstar_rating, rates, notes, center_id } = req.body;
+  if (!name) return res.status(400).json({ error: 'Name required' });
+  const r = db.prepare(`
+    INSERT INTO competitors (center_id, name, city, state, zip, is_ours, youngstar_rating, rates_json, notes)
+    VALUES (?,?,?,?,?,?,?,?,?)
+  `).run(center_id || null, name, city, state, zip, is_ours ? 1 : 0, youngstar_rating || null, JSON.stringify(rates || {}), notes);
+  res.json({ id: r.lastInsertRowid, name, city, state, is_ours: !!is_ours, youngstar_rating, rates: rates || {} });
+});
+
+app.put('/api/competitors/:id', requireAuth, requireAdmin, (req, res) => {
+  const { name, city, state, zip, is_ours, youngstar_rating, rates, notes } = req.body;
+  db.prepare(`UPDATE competitors SET name=?,city=?,state=?,zip=?,is_ours=?,youngstar_rating=?,rates_json=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+    .run(name, city, state, zip, is_ours ? 1 : 0, youngstar_rating || null, JSON.stringify(rates || {}), notes, req.params.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/competitors/:id', requireAuth, requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM competitors WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ─── Food Pricing ──────────────────────────────────────────────────────────────
+
+app.get('/api/vendors', requireAuth, (req, res) => {
+  res.json(db.prepare('SELECT * FROM vendors ORDER BY name').all());
+});
+
+app.post('/api/vendors', requireAuth, requireAdmin, (req, res) => {
+  const { name, type, notes } = req.body;
+  if (!name) return res.status(400).json({ error: 'Vendor name required' });
+  const r = db.prepare('INSERT INTO vendors (name, type, notes) VALUES (?,?,?)').run(name, type || 'grocery', notes);
+  res.json(db.prepare('SELECT * FROM vendors WHERE id = ?').get(r.lastInsertRowid));
+});
+
+app.get('/api/ingredients', requireAuth, (req, res) => {
+  const ingredients = db.prepare('SELECT * FROM ingredients ORDER BY name').all();
+  const prices = db.prepare('SELECT ip.*, v.name as vendor_name FROM ingredient_prices ip JOIN vendors v ON v.id = ip.vendor_id').all();
+  const priceMap = {};
+  prices.forEach(p => {
+    if (!priceMap[p.ingredient_id]) priceMap[p.ingredient_id] = [];
+    priceMap[p.ingredient_id].push(p);
+  });
+  res.json(ingredients.map(i => ({ ...i, prices: priceMap[i.id] || [] })));
+});
+
+app.post('/api/ingredients', requireAuth, requireAdmin, (req, res) => {
+  const { name, category, unit } = req.body;
+  if (!name) return res.status(400).json({ error: 'Ingredient name required' });
+  try {
+    const r = db.prepare('INSERT INTO ingredients (name, category, unit) VALUES (?,?,?)').run(name, category || 'general', unit || 'each');
+    res.json(db.prepare('SELECT * FROM ingredients WHERE id = ?').get(r.lastInsertRowid));
+  } catch {
+    res.status(409).json({ error: 'Ingredient already exists' });
+  }
+});
+
+app.put('/api/ingredients/:id/prices', requireAuth, requireAdmin, (req, res) => {
+  const { prices } = req.body; // [{ vendor_id, price, unit, center_id }]
+  if (!Array.isArray(prices)) return res.status(400).json({ error: 'prices must be an array' });
+  const upsert = db.prepare(`
+    INSERT INTO ingredient_prices (ingredient_id, vendor_id, center_id, price, unit)
+    VALUES (?,?,?,?,?)
+    ON CONFLICT(ingredient_id, vendor_id, center_id) DO UPDATE SET price=excluded.price, unit=excluded.unit, recorded_at=DATE('now')
+  `);
+  const tx = db.transaction(() => prices.forEach(p => upsert.run(req.params.id, p.vendor_id, p.center_id || null, p.price, p.unit || 'each')));
+  tx();
+  res.json({ ok: true });
+});
+
+app.get('/api/ingredients/compare', requireAuth, (req, res) => {
+  const rows = db.prepare(`
+    SELECT i.name as ingredient, i.unit as default_unit, v.name as vendor, ip.price, ip.unit, ip.recorded_at
+    FROM ingredient_prices ip
+    JOIN ingredients i ON i.id = ip.ingredient_id
+    JOIN vendors v ON v.id = ip.vendor_id
+    ORDER BY i.name, ip.price ASC
+  `).all();
+
+  // Group by ingredient
+  const grouped = {};
+  rows.forEach(r => {
+    if (!grouped[r.ingredient]) grouped[r.ingredient] = { ingredient: r.ingredient, vendors: [] };
+    grouped[r.ingredient].vendors.push({ vendor: r.vendor, price: r.price, unit: r.unit });
+  });
+  res.json(Object.values(grouped));
+});
+
+// Menus
+app.get('/api/centers/:centerId/menus', requireAuth, requireCenterAccess, (req, res) => {
+  const menus = db.prepare('SELECT * FROM weekly_menus WHERE center_id = ? ORDER BY week_start DESC').all(req.params.centerId);
+  const items = db.prepare('SELECT * FROM menu_items WHERE menu_id IN (SELECT id FROM weekly_menus WHERE center_id = ?)').all(req.params.centerId);
+  const itemMap = {};
+  items.forEach(i => { if (!itemMap[i.menu_id]) itemMap[i.menu_id] = []; itemMap[i.menu_id].push(i); });
+  res.json(menus.map(m => ({ ...m, items: itemMap[m.id] || [] })));
+});
+
+app.post('/api/centers/:centerId/menus', requireAuth, requireAdmin, (req, res) => {
+  const { week_label, week_start, week_end, items } = req.body;
+  if (!week_start) return res.status(400).json({ error: 'week_start required' });
+  const r = db.prepare('INSERT INTO weekly_menus (center_id, week_label, week_start, week_end) VALUES (?,?,?,?)').run(req.params.centerId, week_label || `Week of ${week_start}`, week_start, week_end || week_start);
+  if (Array.isArray(items)) {
+    const ins = db.prepare('INSERT INTO menu_items (menu_id, day_of_week, meal_type, items) VALUES (?,?,?,?)');
+    const tx = db.transaction(() => items.forEach(i => ins.run(r.lastInsertRowid, i.day_of_week, i.meal_type, i.items)));
+    tx();
+  }
+  res.json({ id: r.lastInsertRowid, week_label, week_start, week_end });
+});
+
 // ─── Dashboard Summary ─────────────────────────────────────────────────────────
 
 app.get('/api/dashboard', requireAuth, (req, res) => {

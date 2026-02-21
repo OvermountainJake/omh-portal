@@ -7,6 +7,8 @@ import CalendarApp from './apps/CalendarApp'
 import WaitlistStub from './apps/WaitlistStub'
 import HandbookApp from './apps/HandbookApp'
 import UsersApp from './apps/UsersApp'
+import FoodPricingApp from './apps/FoodPricingApp'
+import CompetitiveApp from './apps/CompetitiveApp'
 import ComingSoon from './apps/ComingSoon'
 
 function AppRoutes() {
@@ -30,8 +32,8 @@ function AppRoutes() {
         <Route path="/calendar" element={<CalendarApp />} />
         <Route path="/handbook" element={<HandbookApp />} />
         <Route path="/compliance" element={<ComingSoon title="Teacher Compliance" desc="Track teacher certifications, training, and regulatory compliance." icon="ShieldCheck" />} />
-        <Route path="/food-pricing" element={<ComingSoon title="Food Pricing" desc="Compare ingredient costs across vendors and optimize your weekly menus." icon="UtensilsCrossed" />} />
-        <Route path="/competitive" element={<ComingSoon title="Competitive Analysis" desc="See how your pricing compares to daycares in your area." icon="TrendingUp" />} />
+        <Route path="/food-pricing" element={<FoodPricingApp />} />
+        <Route path="/competitive" element={<CompetitiveApp />} />
         <Route path="/time-off" element={<ComingSoon title="Time Off Tracker" desc="Monitor teacher vacation, sick, and personal hours via iSolved." icon="Clock" />} />
         <Route path="/financials" element={<ComingSoon title="Financial Performance" desc="Financial dashboards powered by Intuit Enterprise Suite." icon="DollarSign" />} />
         <Route path="/staffing" element={<ComingSoon title="Staffing Schedule" desc="Manage and view your center's staffing schedule." icon="Users" />} />

@@ -52,6 +52,64 @@ db.exec(`
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS weekly_menus (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    center_id   INTEGER REFERENCES centers(id) ON DELETE CASCADE,
+    week_label  TEXT NOT NULL,
+    week_start  DATE NOT NULL,
+    week_end    DATE NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS menu_items (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    menu_id     INTEGER NOT NULL REFERENCES weekly_menus(id) ON DELETE CASCADE,
+    day_of_week TEXT NOT NULL CHECK(day_of_week IN ('Monday','Tuesday','Wednesday','Thursday','Friday')),
+    meal_type   TEXT NOT NULL CHECK(meal_type IN ('Breakfast','Lunch','Snack')),
+    items       TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS ingredients (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    category   TEXT DEFAULT 'general',
+    unit       TEXT DEFAULT 'each',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS vendors (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL UNIQUE,
+    type       TEXT DEFAULT 'grocery' CHECK(type IN ('grocery','wholesale','distributor','local')),
+    notes      TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS ingredient_prices (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ingredient_id INTEGER NOT NULL REFERENCES ingredients(id) ON DELETE CASCADE,
+    vendor_id     INTEGER NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+    center_id     INTEGER REFERENCES centers(id) ON DELETE CASCADE,
+    price         REAL NOT NULL,
+    unit          TEXT NOT NULL,
+    notes         TEXT,
+    recorded_at   DATE DEFAULT (DATE('now')),
+    UNIQUE(ingredient_id, vendor_id, center_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS competitors (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    center_id         INTEGER REFERENCES centers(id) ON DELETE CASCADE,
+    name              TEXT NOT NULL,
+    city              TEXT,
+    state             TEXT,
+    zip               TEXT,
+    is_ours           INTEGER DEFAULT 0,
+    youngstar_rating  INTEGER,
+    rates_json        TEXT DEFAULT '{}',
+    notes             TEXT,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS handbook_pages (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     title     TEXT NOT NULL,
@@ -83,6 +141,23 @@ if (userCount === 0) {
     'harry@overmountainholdings.com', 'Harry Rossman', adminHash, 'admin'
   );
   console.log('✓ Seeded admin users (Dave, Harry)');
+}
+
+// Seed vendors
+const vendorCount = db.prepare('SELECT COUNT(*) as n FROM vendors').get().n;
+if (vendorCount === 0) {
+  const vendors = [
+    ['Badger Foods', 'distributor'],
+    ['Aldi', 'grocery'],
+    ['Walmart', 'grocery'],
+    ["Sam's Club", 'wholesale'],
+    ["Gordon Food Service", 'distributor'],
+    ['Festival Foods', 'grocery'],
+    ['Costco', 'wholesale'],
+  ];
+  const insertV = db.prepare('INSERT INTO vendors (name, type) VALUES (?,?)');
+  vendors.forEach(([name, type]) => insertV.run(name, type));
+  console.log('✓ Seeded vendors');
 }
 
 module.exports = db;
