@@ -1,0 +1,16 @@
+{
+  "name": "omh-portal",
+  "version": "1.0.0",
+  "description": "Overmountain Holdings Director Portal",
+  "scripts": {
+    "build:frontend": "cd frontend-src && npm install && npm run build",
+    "install:backend": "cd backend && npm install --omit=dev",
+    "build": "npm run build:frontend && npm run install:backend",
+    "start": "cd backend && node server.js",
+    "dev:backend": "cd backend && npm install && node server.js",
+    "dev:frontend": "cd frontend-src && npm install && npm run dev"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}
