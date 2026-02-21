@@ -141,16 +141,13 @@ export default function CalendarApp() {
                       borderRadius: 4,
                       fontSize: '0.6875rem',
                       fontWeight: 500,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
                       marginBottom: '0.125rem',
                       cursor: user?.role === 'admin' ? 'pointer' : 'default',
-                      title: ev.title,
                     }}
-                    title={`${ev.title}${user?.role === 'admin' ? ' — Click to delete' : ''}`}
+                    title={`${ev.title}${ev.start_time ? ` · ${ev.start_time}${ev.end_time ? '–'+ev.end_time : ''}` : ''}${user?.role === 'admin' ? ' — Click to delete' : ''}`}
                   >
-                    {ev.title}
+                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.title}</div>
+                    {ev.start_time && <div style={{ opacity: 0.75, fontSize: '0.625rem' }}>{ev.start_time}{ev.end_time ? `–${ev.end_time}` : ''}</div>}
                   </div>
                 ))}
                 {dayEvents.length > 3 && (
@@ -183,7 +180,7 @@ export default function CalendarApp() {
 }
 
 function AddEventModal({ centerId, defaultDay, API, onClose, onSaved }) {
-  const [form, setForm] = useState({ title: '', description: '', start_date: defaultDay, end_date: '', category: 'management' })
+  const [form, setForm] = useState({ title: '', description: '', start_date: defaultDay, end_date: '', start_time: '', end_time: '', category: 'management' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -235,6 +232,14 @@ function AddEventModal({ centerId, defaultDay, API, onClose, onSaved }) {
               <div className="field">
                 <label>End Date (optional)</label>
                 <input type="date" value={form.end_date} onChange={set('end_date')} />
+              </div>
+              <div className="field">
+                <label>Start Time (optional)</label>
+                <input type="time" value={form.start_time} onChange={set('start_time')} />
+              </div>
+              <div className="field">
+                <label>End Time (optional)</label>
+                <input type="time" value={form.end_time} onChange={set('end_time')} />
               </div>
             </div>
             <div className="field">

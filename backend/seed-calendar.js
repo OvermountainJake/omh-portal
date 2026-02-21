@@ -10,7 +10,7 @@ const events = [
   // ── January ──────────────────────────────────────────────────────────────
   { date: '2026-01-01', title: 'Closed — New Year\'s Day', category: 'management' },
   { date: '2026-01-02', title: 'Census Day — Possible Closure', category: 'management' },
-  { date: '2026-01-06', title: 'PJ Jam Family Night', desc: '5:30–6:30 PM', category: 'family' },
+  { date: '2026-01-06', title: 'PJ Jam Family Night', desc: 'Pajama jam for families', start: '17:30', end: '18:30', category: 'family' },
   { date: '2026-01-07', title: 'Family Connection Kit Goes Home', category: 'family' },
   { date: '2026-01-14', title: 'Guide and Grow Kit Goes Home', category: 'family' },
   { date: '2026-01-19', title: 'Closed — MLK Day / Staff Training Day', category: 'management' },

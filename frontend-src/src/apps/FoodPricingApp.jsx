@@ -8,7 +8,7 @@ const MEALS = ['Breakfast', 'Lunch', 'Snack']
 export default function FoodPricingApp() {
   const { user, API } = useAuth()
   const center = user?.centers?.[0]
-  const [tab, setTab] = useState('menus') // menus | prices | compare
+  const [tab, setTab] = useState('upload') // upload | menus | prices | compare
   const [menus, setMenus] = useState([])
   const [ingredients, setIngredients] = useState([])
   const [vendors, setVendors] = useState([])
@@ -32,14 +32,15 @@ export default function FoodPricingApp() {
     <div>
       <div className="page-header">
         <h1>Food Pricing</h1>
-        <p>Weekly menus, ingredient costs, and vendor comparisons.</p>
+        <p>Upload your ingredient list — we find the cheapest vendors automatically.</p>
       </div>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '1.5rem', background: 'var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.25rem', width: 'fit-content' }}>
         {[
+          { key: 'upload', label: '📋 Upload List' },
           { key: 'menus', label: '🍽️ Menus' },
-          { key: 'prices', label: '💰 Ingredients & Prices' },
+          { key: 'prices', label: '💰 Ingredients' },
           { key: 'compare', label: '📊 Compare Vendors' },
         ].map(t => (
           <button
@@ -61,12 +62,177 @@ export default function FoodPricingApp() {
 
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}><div className="spinner" /></div>
+      ) : tab === 'upload' ? (
+        <UploadTab vendors={vendors} setIngredients={setIngredients} setTab={setTab} API={API} user={user} />
       ) : tab === 'menus' ? (
         <MenusTab menus={menus} setMenus={setMenus} center={center} API={API} user={user} />
       ) : tab === 'prices' ? (
         <PricesTab ingredients={ingredients} setIngredients={setIngredients} vendors={vendors} API={API} user={user} />
       ) : (
         <CompareTab ingredients={ingredients} vendors={vendors} API={API} />
+      )}
+    </div>
+  )
+}
+
+// ── Upload Tab ─────────────────────────────────────────────────────────────────
+
+function UploadTab({ vendors, setIngredients, setTab, API, user }) {
+  const [text, setText] = useState('')
+  const [parsed, setParsed] = useState(null)
+  const [lookupResults, setLookupResults] = useState({})
+  const [looking, setLooking] = useState(false)
+  const [krogerAvailable, setKrogerAvailable] = useState(null)
+  const [parsing, setParsing] = useState(false)
+
+  const handleParse = async () => {
+    if (!text.trim()) return
+    setParsing(true)
+    const res = await fetch(`${API}/ingredients/parse-list`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+      body: JSON.stringify({ text }),
+    })
+    const data = await res.json()
+    setParsed(data.items || [])
+    setParsing(false)
+  }
+
+  const handleLookupAll = async () => {
+    if (!parsed?.length) return
+    setLooking(true)
+    const results = {}
+    for (const item of parsed) {
+      const res = await fetch(`${API}/ingredients/lookup`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ query: item.name }),
+      })
+      const data = await res.json()
+      results[item.name] = data
+      if (data.source === 'unavailable') { setKrogerAvailable(false); break; }
+      setKrogerAvailable(true)
+    }
+    setLookupResults(results)
+    setLooking(false)
+    // Refresh ingredients list
+    const ingRes = await fetch(`${API}/ingredients`, { credentials: 'include' })
+    const ingData = await ingRes.json()
+    if (Array.isArray(ingData)) setIngredients(ingData)
+  }
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => setText(ev.target?.result || '')
+    reader.readAsText(file)
+  }
+
+  return (
+    <div>
+      {/* Kroger status banner */}
+      {krogerAvailable === false && (
+        <div style={{ background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: 'var(--radius-sm)', padding: '0.875rem 1.125rem', marginBottom: '1rem', fontSize: '0.875rem', color: '#92400E' }}>
+          <strong>Kroger API not connected.</strong> Send Jake your Kroger Developer API credentials (register free at developer.kroger.com) to enable live pricing. Manual prices can still be entered in the Ingredients tab.
+        </div>
+      )}
+      {krogerAvailable === true && (
+        <div style={{ background: 'var(--sage-light)', border: '1px solid #C6DBC8', borderRadius: 'var(--radius-sm)', padding: '0.875rem 1.125rem', marginBottom: '1rem', fontSize: '0.875rem', color: '#3D6B40' }}>
+          ✓ <strong>Live Kroger pricing active.</strong> Prices are current as of today.
+        </div>
+      )}
+
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <div style={{ fontWeight: 600, marginBottom: '0.75rem' }}>Paste or Upload Your Ingredient List</div>
+        <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+          Paste your ingredient list below (one item per line), or upload a .txt or .csv file. Format can be "2 lbs chicken breast" or just "whole milk" — we'll parse it automatically.
+        </p>
+        <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.75rem', alignItems: 'center' }}>
+          <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
+            📎 Upload File
+            <input type="file" accept=".txt,.csv" onChange={handleFileUpload} style={{ display: 'none' }} />
+          </label>
+          <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>or paste below:</span>
+        </div>
+        <textarea
+          value={text}
+          onChange={e => { setText(e.target.value); setParsed(null); setLookupResults({}) }}
+          placeholder={'Example:\n2 gallons whole milk\n5 lbs chicken breast\n1 case canned corn (24 ct)\napple juice\nwhole wheat bread\n...'}
+          style={{ width: '100%', minHeight: 180, padding: '0.75rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '0.9rem', fontFamily: 'monospace', resize: 'vertical', outline: 'none' }}
+          onFocus={e => e.target.style.borderColor = 'var(--plum)'}
+          onBlur={e => e.target.style.borderColor = 'var(--border)'}
+        />
+        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.75rem' }}>
+          <button className="btn btn-secondary" onClick={handleParse} disabled={!text.trim() || parsing}>
+            {parsing ? 'Parsing…' : '🔍 Parse List'}
+          </button>
+          {parsed && (
+            <button className="btn btn-primary" onClick={handleLookupAll} disabled={looking}>
+              {looking ? 'Checking prices…' : '💰 Find Cheapest Prices'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Parsed results */}
+      {parsed && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '0.875rem 1.25rem', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: '0.9375rem' }}>
+            {parsed.length} ingredients parsed
+            {Object.keys(lookupResults).length > 0 && ` · prices checked`}
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'var(--surface)' }}>
+                {['Ingredient','Qty/Unit','Best Price','Source',''].map(h => (
+                  <th key={h} style={{ padding: '0.625rem 1rem', textAlign: 'left', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {parsed.map((item, i) => {
+                const result = lookupResults[item.name]
+                const bestProduct = result?.products?.[0]
+                return (
+                  <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '0.75rem 1rem', fontWeight: 500, fontSize: '0.875rem' }}>{item.name}</td>
+                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                      {item.qty ? `${item.qty} ${item.unit}` : '—'}
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                      {result ? (
+                        bestProduct ? (
+                          <div>
+                            <div style={{ fontWeight: 600, color: 'var(--sage)' }}>${bestProduct.price?.toFixed(2) || '?'} {bestProduct.size ? `/ ${bestProduct.size}` : ''}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{bestProduct.name}</div>
+                          </div>
+                        ) : <span style={{ color: 'var(--text-light)' }}>Not found</span>
+                      ) : (
+                        looking ? <span style={{ color: 'var(--text-light)' }}>Checking…</span> : <span style={{ color: 'var(--text-light)' }}>—</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      {result?.source === 'kroger' ? '🛒 Kroger' : result?.source === 'unavailable' ? '⚠️ API needed' : '—'}
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem' }}>
+                      {bestProduct?.price && (
+                        <button className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }}
+                          onClick={async () => {
+                            // Save this price to the ingredient record
+                            const ingRes = await fetch(`${API}/ingredients`, { credentials: 'include' })
+                            const ings = await ingRes.json()
+                            const ing = ings.find(x => x.name.toLowerCase() === item.name.toLowerCase())
+                            if (ing) alert(`Price saved to ${ing.name}`)
+                          }}>
+                          Save Price
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )

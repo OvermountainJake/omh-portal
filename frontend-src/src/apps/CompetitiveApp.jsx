@@ -43,6 +43,19 @@ export default function CompetitiveApp() {
         )}
       </div>
 
+      {/* Auto-discover notice */}
+      <div style={{ background: 'var(--plum-bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.875rem 1.125rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+        <MapPin size={18} style={{ color: 'var(--plum)', flexShrink: 0, marginTop: '0.125rem' }} />
+        <div>
+          <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--plum-dark)', marginBottom: '0.25rem' }}>
+            Auto-discovery requires a Google Maps API key
+          </div>
+          <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+            6 Appleton-area competitors are pre-loaded. Once you send Jake a Google Maps API key (free from console.cloud.google.com), this will automatically find all daycares within any radius and keep the list current.
+          </div>
+        </div>
+      </div>
+
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}><div className="spinner" /></div>
       ) : competitors.length === 0 ? (

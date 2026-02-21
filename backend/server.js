@@ -169,19 +169,19 @@ app.get('/api/centers/:centerId/calendar', requireAuth, requireCenterAccess, (re
 });
 
 app.post('/api/centers/:centerId/calendar', requireAuth, requireAdmin, (req, res) => {
-  const { title, description, start_date, end_date, all_day, category } = req.body;
+  const { title, description, start_date, end_date, all_day, category, start_time, end_time } = req.body;
   if (!title || !start_date) return res.status(400).json({ error: 'Title and start date required' });
   const result = db.prepare(`
-    INSERT INTO calendar_events (center_id, title, description, start_date, end_date, all_day, category)
-    VALUES (?,?,?,?,?,?,?)
-  `).run(req.params.centerId, title, description, start_date, end_date, all_day ?? 1, category || 'management');
+    INSERT INTO calendar_events (center_id, title, description, start_date, end_date, all_day, category, start_time, end_time)
+    VALUES (?,?,?,?,?,?,?,?,?)
+  `).run(req.params.centerId, title, description, start_date, end_date||null, all_day ?? 1, category || 'management', start_time||null, end_time||null);
   res.json(db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(result.lastInsertRowid));
 });
 
 app.put('/api/calendar/:id', requireAuth, requireAdmin, (req, res) => {
-  const { title, description, start_date, end_date, all_day, category } = req.body;
-  db.prepare(`UPDATE calendar_events SET title=?, description=?, start_date=?, end_date=?, all_day=?, category=? WHERE id=?`)
-    .run(title, description, start_date, end_date, all_day ?? 1, category, req.params.id);
+  const { title, description, start_date, end_date, all_day, category, start_time, end_time } = req.body;
+  db.prepare(`UPDATE calendar_events SET title=?, description=?, start_date=?, end_date=?, all_day=?, category=?, start_time=?, end_time=? WHERE id=?`)
+    .run(title, description, start_date, end_date||null, all_day ?? 1, category, start_time||null, end_time||null, req.params.id);
   res.json(db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id));
 });
 
@@ -574,6 +574,88 @@ app.delete('/api/financials/:id', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Kroger Live Pricing (activates when KROGER_CLIENT_ID is set) ────────────
+
+let krogerToken = null;
+let krogerTokenExpiry = 0;
+
+async function getKrogerToken() {
+  if (krogerToken && Date.now() < krogerTokenExpiry) return krogerToken;
+  const clientId = process.env.KROGER_CLIENT_ID;
+  const clientSecret = process.env.KROGER_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return null;
+  try {
+    const https = require('https');
+    return new Promise((resolve) => {
+      const creds = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+      const body = 'grant_type=client_credentials&scope=product.compact';
+      const req = https.request({ hostname: 'api.kroger.com', path: '/v1/connect/oauth2/token', method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Basic ${creds}`, 'Content-Length': Buffer.byteLength(body) }
+      }, res => {
+        let d = '';
+        res.on('data', c => d += c);
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(d);
+            krogerToken = json.access_token;
+            krogerTokenExpiry = Date.now() + ((json.expires_in || 1800) - 60) * 1000;
+            resolve(krogerToken);
+          } catch { resolve(null); }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.write(body); req.end();
+    });
+  } catch { return null; }
+}
+
+async function krogerSearch(query, token) {
+  const https = require('https');
+  return new Promise((resolve) => {
+    const path = `/v1/products?filter.term=${encodeURIComponent(query)}&filter.locationId=01400943&filter.limit=5`;
+    const req = https.request({ hostname: 'api.kroger.com', path, method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }
+    }, res => {
+      let d = '';
+      res.on('data', c => d += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(d)); } catch { resolve({}); }
+      });
+    });
+    req.on('error', () => resolve({}));
+    req.end();
+  });
+}
+
+app.post('/api/ingredients/lookup', requireAuth, async (req, res) => {
+  const { query } = req.body;
+  if (!query) return res.status(400).json({ error: 'query required' });
+  const token = await getKrogerToken();
+  if (!token) return res.json({ source: 'unavailable', message: 'Kroger API not configured. Add KROGER_CLIENT_ID + KROGER_CLIENT_SECRET in Railway.', products: [] });
+  try {
+    const data = await krogerSearch(query, token);
+    const products = (data.data || []).map(p => ({
+      name: p.description, brand: p.brand, size: p.items?.[0]?.size,
+      price: p.items?.[0]?.price?.regular, sale_price: p.items?.[0]?.price?.promo,
+    }));
+    res.json({ source: 'kroger', products });
+  } catch (e) { res.json({ source: 'error', message: e.message, products: [] }); }
+});
+
+app.post('/api/ingredients/parse-list', requireAuth, (req, res) => {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'text required' });
+  const lines = text.split(/\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  const items = lines.map(line => {
+    const match = line.match(/^(\d+\.?\d*)\s*(lb[s]?|oz|gallon[s]?|quart[s]?|pint[s]?|each|case|bag[s]?|box(?:es)?|can[s]?|jar[s]?|dozen|pack[s]?|ct|count)\.?\s+(.+)$/i);
+    if (match) return { qty: parseFloat(match[1]), unit: match[2].toLowerCase().replace(/s$/, ''), name: match[3].trim() };
+    return { qty: null, unit: null, name: line.replace(/^[\d.,]+\s*/, '').trim() };
+  });
+  const ins = db.prepare('INSERT OR IGNORE INTO ingredients (name) VALUES (?)');
+  items.forEach(item => { if (item.name) ins.run(item.name); });
+  res.json({ items, count: items.length });
+});
+
 // ─── Catch-all → SPA ──────────────────────────────────────────────────────────
 
 if (fs.existsSync(FRONTEND_BUILD)) {
@@ -584,7 +666,6 @@ if (fs.existsSync(FRONTEND_BUILD)) {
 
 app.listen(PORT, () => {
   console.log(`OMH Portal running on port ${PORT}`);
-  // Auto-seed data on first run
   const calendarCount = db.prepare('SELECT COUNT(*) as n FROM calendar_events').get().n;
   if (calendarCount === 0) {
     try { require('./seed-calendar'); console.log('✓ Auto-seeded calendar'); } catch(e) { console.warn('Calendar seed error:', e.message); }
