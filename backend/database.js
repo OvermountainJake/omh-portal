@@ -145,6 +145,92 @@ db.exec(`
     sort_order INTEGER DEFAULT 0,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- Teacher Compliance
+  CREATE TABLE IF NOT EXISTS staff (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    center_id    INTEGER REFERENCES centers(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    title        TEXT,
+    email        TEXT,
+    phone        TEXT,
+    hire_date    DATE,
+    status       TEXT DEFAULT 'active' CHECK(status IN ('active','inactive')),
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS compliance_requirements (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    description TEXT,
+    recurs      TEXT DEFAULT 'once' CHECK(recurs IN ('once','annual','biennial','every3years')),
+    applies_to  TEXT DEFAULT 'all',
+    sort_order  INTEGER DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS staff_compliance (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id       INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    requirement_id INTEGER NOT NULL REFERENCES compliance_requirements(id) ON DELETE CASCADE,
+    completed_date DATE,
+    expiry_date    DATE,
+    notes          TEXT,
+    UNIQUE(staff_id, requirement_id)
+  );
+
+  -- Time Off Tracker
+  CREATE TABLE IF NOT EXISTS time_off_requests (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id    INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    center_id   INTEGER REFERENCES centers(id),
+    type        TEXT NOT NULL CHECK(type IN ('vacation','sick','personal','bereavement','other')),
+    start_date  DATE NOT NULL,
+    end_date    DATE NOT NULL,
+    hours       REAL,
+    status      TEXT DEFAULT 'pending' CHECK(status IN ('pending','approved','denied')),
+    notes       TEXT,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS staff_pto_balances (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id     INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE UNIQUE,
+    vacation_hrs REAL DEFAULT 0,
+    sick_hrs     REAL DEFAULT 0,
+    personal_hrs REAL DEFAULT 0,
+    as_of_date   DATE,
+    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Staffing Schedule
+  CREATE TABLE IF NOT EXISTS schedule_shifts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id   INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    center_id  INTEGER REFERENCES centers(id) ON DELETE CASCADE,
+    shift_date DATE NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time   TEXT NOT NULL,
+    role       TEXT,
+    notes      TEXT
+  );
+
+  -- Financial Performance
+  CREATE TABLE IF NOT EXISTS financial_snapshots (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    center_id     INTEGER REFERENCES centers(id) ON DELETE CASCADE,
+    period_label  TEXT NOT NULL,
+    period_start  DATE NOT NULL,
+    period_end    DATE NOT NULL,
+    revenue       REAL DEFAULT 0,
+    expenses      REAL DEFAULT 0,
+    payroll       REAL DEFAULT 0,
+    food_costs    REAL DEFAULT 0,
+    supplies      REAL DEFAULT 0,
+    utilities     REAL DEFAULT 0,
+    other_exp     REAL DEFAULT 0,
+    notes         TEXT,
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // ─── Seed data ────────────────────────────────────────────────────────────────
@@ -185,6 +271,29 @@ if (vendorCount === 0) {
   const insertV = db.prepare('INSERT INTO vendors (name, type) VALUES (?,?)');
   vendors.forEach(([name, type]) => insertV.run(name, type));
   console.log('✓ Seeded vendors');
+}
+
+// Seed compliance requirements
+const compCount = db.prepare('SELECT COUNT(*) as n FROM compliance_requirements').get().n;
+if (compCount === 0) {
+  const reqs = [
+    ['Background Check', 'State background check before hire', 'once'],
+    ['CPR Certification', 'Infant/Child CPR — must be in-person', 'biennial'],
+    ['First Aid Certification', 'Standard first aid training', 'biennial'],
+    ['Mandated Reporter Training', 'Child abuse mandated reporter (WI ch. 48)', 'annual'],
+    ['Annual Health Exam', 'Physical health examination on file', 'annual'],
+    ['TB Screening', 'Tuberculosis risk screening', 'annual'],
+    ['Food Handler Certification', 'Food safety / ServSafe', 'every3years'],
+    ['YoungStar Training Hours', 'Required training hours for YoungStar rating level', 'annual'],
+    ['AHT / Shaken Baby Training', 'Abusive Head Trauma prevention', 'once'],
+    ['Bloodborne Pathogens', 'OSHA bloodborne pathogens training', 'annual'],
+    ['Emergency Procedures', 'Fire/evacuation/lockdown drills documented', 'annual'],
+    ['Safe Sleep Training', 'SIDS/safe sleep (required for infant rooms)', 'once'],
+    ['Pesticide Notification', 'Right-to-know pesticide awareness', 'annual'],
+  ];
+  const ins = db.prepare('INSERT INTO compliance_requirements (name, description, recurs) VALUES (?,?,?)');
+  reqs.forEach(([name, desc, recurs], i) => ins.run(name, desc, recurs));
+  console.log('✓ Seeded compliance requirements');
 }
 
 module.exports = db;

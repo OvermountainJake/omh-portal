@@ -9,6 +9,11 @@ import HandbookApp from './apps/HandbookApp'
 import UsersApp from './apps/UsersApp'
 import FoodPricingApp from './apps/FoodPricingApp'
 import CompetitiveApp from './apps/CompetitiveApp'
+import ComplianceApp from './apps/ComplianceApp'
+import TimeOffApp from './apps/TimeOffApp'
+import StaffingApp from './apps/StaffingApp'
+import FinancialsApp from './apps/FinancialsApp'
+import EmployeeDirectoryApp from './apps/EmployeeDirectoryApp'
 import ComingSoon from './apps/ComingSoon'
 
 function AppRoutes() {
@@ -31,13 +36,13 @@ function AppRoutes() {
         <Route path="/waitlist" element={<WaitlistApp />} />
         <Route path="/calendar" element={<CalendarApp />} />
         <Route path="/handbook" element={<HandbookApp />} />
-        <Route path="/compliance" element={<ComingSoon title="Teacher Compliance" desc="Track teacher certifications, training, and regulatory compliance." icon="ShieldCheck" />} />
+        <Route path="/compliance" element={<ComplianceApp />} />
         <Route path="/food-pricing" element={<FoodPricingApp />} />
         <Route path="/competitive" element={<CompetitiveApp />} />
-        <Route path="/time-off" element={<ComingSoon title="Time Off Tracker" desc="Monitor teacher vacation, sick, and personal hours via iSolved." icon="Clock" />} />
-        <Route path="/financials" element={<ComingSoon title="Financial Performance" desc="Financial dashboards powered by Intuit Enterprise Suite." icon="DollarSign" />} />
-        <Route path="/staffing" element={<ComingSoon title="Staffing Schedule" desc="Manage and view your center's staffing schedule." icon="Users" />} />
-        <Route path="/directory" element={<ComingSoon title="Employee Directory" desc="All staff in one place." icon="UserSquare2" />} />
+        <Route path="/time-off" element={<TimeOffApp />} />
+        <Route path="/financials" element={user?.role === 'admin' ? <FinancialsApp /> : <Navigate to="/" />} />
+        <Route path="/staffing" element={<StaffingApp />} />
+        <Route path="/directory" element={<EmployeeDirectoryApp />} />
         <Route path="/users" element={user.role === 'admin' ? <UsersApp /> : <Navigate to="/" />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
