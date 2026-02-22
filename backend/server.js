@@ -169,19 +169,19 @@ app.get('/api/centers/:centerId/calendar', requireAuth, requireCenterAccess, (re
 });
 
 app.post('/api/centers/:centerId/calendar', requireAuth, requireAdmin, (req, res) => {
-  const { title, description, start_date, end_date, all_day, category, start_time, end_time } = req.body;
+  const { title, description, location, start_date, end_date, all_day, category, start_time, end_time } = req.body;
   if (!title || !start_date) return res.status(400).json({ error: 'Title and start date required' });
   const result = db.prepare(`
-    INSERT INTO calendar_events (center_id, title, description, start_date, end_date, all_day, category, start_time, end_time)
-    VALUES (?,?,?,?,?,?,?,?,?)
-  `).run(req.params.centerId, title, description, start_date, end_date||null, all_day ?? 1, category || 'management', start_time||null, end_time||null);
+    INSERT INTO calendar_events (center_id, title, description, location, start_date, end_date, all_day, category, start_time, end_time)
+    VALUES (?,?,?,?,?,?,?,?,?,?)
+  `).run(req.params.centerId, title, description||null, location||null, start_date, end_date||null, all_day ?? 1, category || 'management', start_time||null, end_time||null);
   res.json(db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(result.lastInsertRowid));
 });
 
 app.put('/api/calendar/:id', requireAuth, requireAdmin, (req, res) => {
-  const { title, description, start_date, end_date, all_day, category, start_time, end_time } = req.body;
-  db.prepare(`UPDATE calendar_events SET title=?, description=?, start_date=?, end_date=?, all_day=?, category=?, start_time=?, end_time=? WHERE id=?`)
-    .run(title, description, start_date, end_date||null, all_day ?? 1, category, start_time||null, end_time||null, req.params.id);
+  const { title, description, location, start_date, end_date, all_day, category, start_time, end_time } = req.body;
+  db.prepare(`UPDATE calendar_events SET title=?, description=?, location=?, start_date=?, end_date=?, all_day=?, category=?, start_time=?, end_time=? WHERE id=?`)
+    .run(title, description||null, location||null, start_date, end_date||null, all_day ?? 1, category, start_time||null, end_time||null, req.params.id);
   res.json(db.prepare('SELECT * FROM calendar_events WHERE id = ?').get(req.params.id));
 });
 

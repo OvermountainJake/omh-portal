@@ -296,4 +296,10 @@ if (compCount === 0) {
   console.log('✓ Seeded compliance requirements');
 }
 
+// ─── Safe migrations (add columns if missing) ─────────────────────────────────
+const safeAlter = (sql) => { try { db.exec(sql); } catch(e) {} };
+safeAlter('ALTER TABLE calendar_events ADD COLUMN start_time TEXT');
+safeAlter('ALTER TABLE calendar_events ADD COLUMN end_time TEXT');
+safeAlter('ALTER TABLE calendar_events ADD COLUMN location TEXT');
+
 module.exports = db;
