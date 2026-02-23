@@ -656,6 +656,147 @@ app.post('/api/ingredients/parse-list', requireAuth, (req, res) => {
   res.json({ items, count: items.length });
 });
 
+// ─── Recipes ──────────────────────────────────────────────────────────────────
+
+app.get('/api/recipes', requireAuth, (req, res) => {
+  const { center_id } = req.query;
+  let query = 'SELECT * FROM recipes ORDER BY name';
+  let params = [];
+  if (center_id) {
+    query = 'SELECT * FROM recipes WHERE center_id IS NULL OR center_id = ? ORDER BY name';
+    params = [center_id];
+  }
+  const rows = db.prepare(query).all(...params);
+  res.json(rows.map(r => ({
+    ...r,
+    ingredients: JSON.parse(r.ingredients || '[]'),
+    steps: JSON.parse(r.steps || '[]'),
+  })));
+});
+
+app.post('/api/recipes', requireAuth, requireAdmin, (req, res) => {
+  const { center_id, name, category, servings, ingredients, steps, notes } = req.body;
+  if (!name) return res.status(400).json({ error: 'Name required' });
+  const r = db.prepare('INSERT INTO recipes (center_id,name,category,servings,ingredients,steps,notes) VALUES (?,?,?,?,?,?,?)')
+    .run(center_id || null, name, category || null, servings || 1,
+         JSON.stringify(ingredients || []), JSON.stringify(steps || []), notes || null);
+  res.json(db.prepare('SELECT * FROM recipes WHERE id=?').get(r.lastInsertRowid));
+});
+
+app.put('/api/recipes/:id', requireAuth, requireAdmin, (req, res) => {
+  const { name, category, servings, ingredients, steps, notes } = req.body;
+  db.prepare('UPDATE recipes SET name=?,category=?,servings=?,ingredients=?,steps=?,notes=?,updated_at=datetime("now") WHERE id=?')
+    .run(name, category || null, servings || 1,
+         JSON.stringify(ingredients || []), JSON.stringify(steps || []), notes || null, req.params.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/recipes/:id', requireAuth, requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM recipes WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ─── Center & Licensing Compliance ────────────────────────────────────────────
+
+app.get('/api/centers/:centerId/center-compliance', requireAuth, requireCenterAccess, (req, res) => {
+  const rows = db.prepare('SELECT * FROM center_compliance WHERE center_id=? ORDER BY due_date ASC').all(req.params.centerId);
+  res.json(rows);
+});
+
+app.post('/api/centers/:centerId/center-compliance', requireAuth, requireAdmin, (req, res) => {
+  const { name, type, description, state, due_date, completed_date, recurs, notes } = req.body;
+  if (!name) return res.status(400).json({ error: 'Name required' });
+  const r = db.prepare('INSERT INTO center_compliance (center_id,name,type,description,state,due_date,completed_date,recurs,notes) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(req.params.centerId, name, type || 'licensing', description || null, state || null, due_date || null, completed_date || null, recurs || 'annual', notes || null);
+  res.json(db.prepare('SELECT * FROM center_compliance WHERE id=?').get(r.lastInsertRowid));
+});
+
+app.put('/api/center-compliance/:id', requireAuth, requireAdmin, (req, res) => {
+  const { name, type, description, state, due_date, completed_date, recurs, notes } = req.body;
+  db.prepare('UPDATE center_compliance SET name=?,type=?,description=?,state=?,due_date=?,completed_date=?,recurs=?,notes=?,updated_at=datetime("now") WHERE id=?')
+    .run(name, type || 'licensing', description || null, state || null, due_date || null, completed_date || null, recurs || 'annual', notes || null, req.params.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/center-compliance/:id', requireAuth, requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM center_compliance WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ─── Staff Points ─────────────────────────────────────────────────────────────
+
+app.get('/api/staff/:id/points', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT sp.*, u.name as recorded_by_name FROM staff_points sp LEFT JOIN users u ON sp.recorded_by=u.id WHERE sp.staff_id=? ORDER BY sp.event_date DESC, sp.created_at DESC').all(req.params.id);
+  const total = rows.reduce((sum, r) => sum + r.points, 0);
+  res.json({ history: rows, total });
+});
+
+app.post('/api/staff/:id/points', requireAuth, (req, res) => {
+  const { type, points, notes, event_date } = req.body;
+  if (!type || points == null) return res.status(400).json({ error: 'type and points required' });
+  const r = db.prepare('INSERT INTO staff_points (staff_id,type,points,notes,recorded_by,event_date) VALUES (?,?,?,?,?,?)')
+    .run(req.params.id, type, points, notes || null, req.user.id, event_date || new Date().toISOString().split('T')[0]);
+  res.json(db.prepare('SELECT * FROM staff_points WHERE id=?').get(r.lastInsertRowid));
+});
+
+app.delete('/api/points/:id', requireAuth, requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM staff_points WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ─── Staff Reviews ────────────────────────────────────────────────────────────
+
+app.get('/api/reviews', requireAuth, (req, res) => {
+  let rows;
+  if (req.user.role === 'admin') {
+    rows = db.prepare('SELECT sr.*, s.name as staff_name, s.title as staff_title, s.center_id, u.name as reviewer_name FROM staff_reviews sr JOIN staff s ON sr.staff_id=s.id LEFT JOIN users u ON sr.reviewed_by=u.id ORDER BY sr.created_at DESC').all();
+  } else {
+    // Directors only see their center's staff
+    const centers = db.prepare('SELECT center_id FROM user_centers WHERE user_id=?').all(req.user.id).map(r => r.center_id);
+    if (!centers.length) return res.json([]);
+    rows = db.prepare(`SELECT sr.*, s.name as staff_name, s.title as staff_title, u.name as reviewer_name FROM staff_reviews sr JOIN staff s ON sr.staff_id=s.id LEFT JOIN users u ON sr.reviewed_by=u.id WHERE s.center_id IN (${centers.map(()=>'?').join(',')}) ORDER BY sr.created_at DESC`).all(...centers);
+  }
+  res.json(rows);
+});
+
+app.post('/api/reviews', requireAuth, (req, res) => {
+  const { staff_id, review_period, positives, growth_areas, focus_areas, notes } = req.body;
+  if (!staff_id || !review_period) return res.status(400).json({ error: 'staff_id and review_period required' });
+  const r = db.prepare('INSERT INTO staff_reviews (staff_id,review_period,positives,growth_areas,focus_areas,notes,reviewed_by) VALUES (?,?,?,?,?,?,?)')
+    .run(staff_id, review_period, positives || null, growth_areas || null, focus_areas || null, notes || null, req.user.id);
+  res.json(db.prepare('SELECT * FROM staff_reviews WHERE id=?').get(r.lastInsertRowid));
+});
+
+app.put('/api/reviews/:id', requireAuth, requireAdmin, (req, res) => {
+  const { review_period, positives, growth_areas, focus_areas, notes } = req.body;
+  db.prepare('UPDATE staff_reviews SET review_period=?,positives=?,growth_areas=?,focus_areas=?,notes=?,updated_at=datetime("now") WHERE id=?')
+    .run(review_period, positives || null, growth_areas || null, focus_areas || null, notes || null, req.params.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/staff/:id/reviews', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT sr.*, u.name as reviewer_name FROM staff_reviews sr LEFT JOIN users u ON sr.reviewed_by=u.id WHERE sr.staff_id=? ORDER BY sr.created_at DESC').all(req.params.id);
+  res.json(rows);
+});
+
+// ─── Handbook Documents ───────────────────────────────────────────────────────
+
+app.get('/api/handbooks', requireAuth, (req, res) => {
+  res.json(db.prepare('SELECT * FROM handbook_documents ORDER BY type, updated_at DESC').all());
+});
+
+app.post('/api/handbooks', requireAuth, requireAdmin, (req, res) => {
+  const { type, title, file_url, notes } = req.body;
+  if (!type || !title) return res.status(400).json({ error: 'type and title required' });
+  const r = db.prepare('INSERT INTO handbook_documents (type,title,file_url,notes) VALUES (?,?,?,?)').run(type, title, file_url || null, notes || null);
+  res.json(db.prepare('SELECT * FROM handbook_documents WHERE id=?').get(r.lastInsertRowid));
+});
+
+app.delete('/api/handbooks/:id', requireAuth, requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM handbook_documents WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ─── Catch-all → SPA ──────────────────────────────────────────────────────────
 
 if (fs.existsSync(FRONTEND_BUILD)) {

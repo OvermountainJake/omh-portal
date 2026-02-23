@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { Plus, Search, Edit2, Trash2, X, AlertCircle, Mail } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, X, AlertCircle, Mail, Baby } from 'lucide-react'
 
 const HEARD_ABOUT_OPTIONS = [
   'Word of mouth', 'Google search', 'Social media',
@@ -21,6 +21,34 @@ function calcAge(dob) {
   if (months < 24) return `${months}mo`
   return `${Math.floor(months / 12)}y ${months % 12}mo`
 }
+
+function calcAgeMonths(dob) {
+  if (!dob) return null
+  const birth = new Date(dob + 'T00:00:00')
+  const now = new Date()
+  return (now.getFullYear() - birth.getFullYear()) * 12 + (now.getMonth() - birth.getMonth())
+}
+
+function getAgeGroup(entry) {
+  if (entry.is_expected) return 'expected'
+  if (!entry.date_of_birth) return 'expected'
+  const months = calcAgeMonths(entry.date_of_birth)
+  if (months === null) return 'expected'
+  if (months < 24) return 'infants'
+  if (months < 36) return 'toddlers'
+  if (months < 48) return 'age3'
+  if (months < 60) return 'age4'
+  return 'older'
+}
+
+const AGE_GROUPS = [
+  { key: 'expected', label: 'Expected', emoji: '🤰', color: '#7C3AED', bg: '#F5F3FF' },
+  { key: 'infants',  label: 'Infants',  emoji: '👶', color: '#DB2777', bg: '#FDF2F8', sub: '0–24 mo' },
+  { key: 'toddlers', label: 'Toddlers', emoji: '🧒', color: '#D97706', bg: '#FFFBEB', sub: '24–36 mo' },
+  { key: 'age3',     label: '3 Years',  emoji: '🎒', color: '#059669', bg: '#ECFDF5', sub: '3 yrs' },
+  { key: 'age4',     label: '4 Years',  emoji: '🎨', color: '#2563EB', bg: '#EFF6FF', sub: '4 yrs' },
+  { key: 'older',    label: 'Older',    emoji: '📚', color: '#64748B', bg: '#F8FAFC', sub: '5+ yrs' },
+]
 
 export default function WaitlistApp() {
   const { user, API } = useAuth()
@@ -79,11 +107,24 @@ export default function WaitlistApp() {
     return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av)
   })
 
-  const thisMonth = entries.filter(e => {
-    const d = new Date(e.signed_up_at); const n = new Date()
-    return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear()
-  }).length
+  const now = new Date()
+  const thisMonthEntries = entries.filter(e => {
+    const d = new Date(e.signed_up_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+  })
   const needsFollowUp = entries.filter(e => !e.last_contact).length
+
+  // Age group counts
+  const groupCounts = {}
+  const groupAddedThisMonth = {}
+  AGE_GROUPS.forEach(g => { groupCounts[g.key] = 0; groupAddedThisMonth[g.key] = 0 })
+  entries.forEach(e => {
+    const g = getAgeGroup(e)
+    groupCounts[g] = (groupCounts[g] || 0) + 1
+  })
+  thisMonthEntries.forEach(e => {
+    const g = getAgeGroup(e)
+    groupAddedThisMonth[g] = (groupAddedThisMonth[g] || 0) + 1
+  })
 
   return (
     <div>
@@ -99,12 +140,22 @@ export default function WaitlistApp() {
         )}
       </div>
 
-      {/* Stats */}
-      <div className="grid-2" style={{ gridTemplateColumns: 'repeat(4,1fr)', marginBottom: '1.5rem', gap: '0.75rem' }}>
-        <StatCard label="Total on List" value={entries.length} color="var(--plum)" />
-        <StatCard label="Showing" value={filtered.length} color="#6366F1" />
-        <StatCard label="Added This Month" value={thisMonth} color="var(--sage)" />
-        <StatCard label="Need Follow-up" value={needsFollowUp} color={needsFollowUp > 0 ? '#D97706' : 'var(--sage)'} alert={needsFollowUp > 0} />
+      {/* Age Group Stats */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '0.625rem', marginBottom: '1.5rem' }}>
+        {AGE_GROUPS.map(g => (
+          <div key={g.key} className="card" style={{ padding: '0.875rem 0.75rem', borderLeft: `3px solid ${g.color}`, background: g.bg }}>
+            <div style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>{g.emoji} <strong style={{ color: g.color }}>{g.label}</strong></div>
+            {g.sub && <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: '0.375rem' }}>{g.sub}</div>}
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: g.color, lineHeight: 1 }}>{groupCounts[g.key]}</div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>+{groupAddedThisMonth[g.key]} this mo.</div>
+          </div>
+        ))}
+        <div className="card" style={{ padding: '0.875rem 0.75rem', borderLeft: '3px solid var(--plum)', background: 'var(--plum-bg)' }}>
+          <div style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>📋 <strong style={{ color: 'var(--plum)' }}>Total</strong></div>
+          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: '0.375rem' }}>all groups</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--plum)', lineHeight: 1 }}>{entries.length}</div>
+          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>+{thisMonthEntries.length} this mo.</div>
+        </div>
       </div>
 
       {/* Search */}
@@ -174,7 +225,11 @@ export default function WaitlistApp() {
                   >
                     <td style={{ padding: '0.75rem 1rem', fontWeight: 600, fontSize: '0.9rem', whiteSpace: 'nowrap' }}>{entry.child_name}</td>
                     <td style={{ padding: '0.75rem 1rem', fontSize: '0.8125rem', whiteSpace: 'nowrap' }}>
-                      {entry.date_of_birth ? (
+                      {entry.is_expected ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', fontWeight: 600, background: '#F5F3FF', color: '#7C3AED', padding: '0.125rem 0.5rem', borderRadius: 999 }}>
+                          🤰 Expected
+                        </span>
+                      ) : entry.date_of_birth ? (
                         <div>
                           <div style={{ color: 'var(--text)' }}>{entry.date_of_birth}</div>
                           <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{calcAge(entry.date_of_birth)}</div>
@@ -243,7 +298,7 @@ const EMPTY_FORM = {
   child_name: '', date_of_birth: '', desired_enrollment_time: '',
   parent_name: '', phone: '', email: '', notes: '',
   last_contact: '', signed_up_at: new Date().toISOString().split('T')[0],
-  heard_about_us: '',
+  heard_about_us: '', is_expected: false,
 }
 
 function EntryModal({ entry, onSave, onClose }) {
@@ -258,10 +313,12 @@ function EntryModal({ entry, onSave, onClose }) {
     last_contact: entry.last_contact || '',
     signed_up_at: entry.signed_up_at?.split('T')[0] || new Date().toISOString().split('T')[0],
     heard_about_us: entry.heard_about_us || '',
+    is_expected: !!entry.is_expected,
   } : { ...EMPTY_FORM })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
+  const setCheck = k => e => setForm(f => ({ ...f, [k]: e.target.checked }))
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -288,10 +345,18 @@ function EntryModal({ entry, onSave, onClose }) {
                 <label>Child's Full Name *</label>
                 <input value={form.child_name} onChange={set('child_name')} placeholder="First and last name" required autoFocus />
               </div>
-              <div className="field">
-                <label>Date of Birth</label>
-                <input type="date" value={form.date_of_birth} onChange={set('date_of_birth')} />
+              <div className="field" style={{ gridColumn: '1 / -1' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={form.is_expected} onChange={setCheck('is_expected')} style={{ width: 16, height: 16 }} />
+                  <span>🤰 Mother is still pregnant — child not yet born</span>
+                </label>
               </div>
+              {!form.is_expected && (
+                <div className="field">
+                  <label>Date of Birth</label>
+                  <input type="date" value={form.date_of_birth} onChange={set('date_of_birth')} />
+                </div>
+              )}
               <div className="field">
                 <label>Desired Enrollment</label>
                 <input list="enrollment-opts" value={form.desired_enrollment_time} onChange={set('desired_enrollment_time')} placeholder="e.g. Full-time, Fall 2026" />

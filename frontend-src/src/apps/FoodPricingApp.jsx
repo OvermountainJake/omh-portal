@@ -30,7 +30,7 @@ const MEAL_COLORS = {
 export default function FoodPricingApp() {
   const { user, API } = useAuth()
   const center = user?.centers?.[0]
-  const [tab, setTab] = useState('upload')
+  const [tab, setTab] = useState('purchasing')
   const [menus, setMenus] = useState([])
   const [ingredients, setIngredients] = useState([])
   const [vendors, setVendors] = useState([])
@@ -77,10 +77,10 @@ export default function FoodPricingApp() {
   const compareCount = ingredients.filter(i => i.prices?.length > 1).length
 
   const tabs = [
-    { key: 'upload',  label: 'Upload List',      icon: Upload,         count: null },
-    { key: 'menus',   label: 'Menus',             icon: UtensilsCrossed,count: menus.length },
-    { key: 'prices',  label: 'Ingredients',       icon: Package,        count: ingredients.length },
-    { key: 'compare', label: 'Compare Vendors',   icon: BarChart3,      count: compareCount },
+    { key: 'purchasing', label: 'Purchasing',          icon: ShoppingCart,   count: null },
+    { key: 'menus',      label: 'Menus',               icon: UtensilsCrossed,count: menus.length },
+    { key: 'recipes',    label: 'Recipes',             icon: FileText,       count: null },
+    { key: 'insights',   label: 'Ingredient Insights', icon: BarChart3,      count: ingredients.length },
   ]
 
   return (
@@ -91,13 +91,10 @@ export default function FoodPricingApp() {
           <div>
             <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <UtensilsCrossed size={22} style={{ color: 'var(--plum)' }} />
-              Food Pricing
+              Food Program
             </h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '0.2rem' }}>
-              Upload your ingredient list — find the cheapest vendors automatically.
-              <span style={{ color: 'var(--text-light)', marginLeft: '0.75rem', fontSize: '0.8125rem' }}>
-                Updated {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-              </span>
+              Menus, recipes, purchasing, and ingredient insights — all in one place.
             </p>
           </div>
         </div>
@@ -105,7 +102,7 @@ export default function FoodPricingApp() {
 
       {/* Stats Cards */}
       {!loading && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.875rem', marginBottom: '1.5rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.875rem', marginBottom: '1.5rem' }}>
           <StatCard
             icon={<Package size={18} />}
             iconBg="var(--plum)"
@@ -121,23 +118,6 @@ export default function FoodPricingApp() {
             value={stats.totalVendors}
             suffix=""
             empty="0"
-          />
-          <StatCard
-            icon={<DollarSign size={18} />}
-            iconBg="#C9A84C"
-            label="Est. Monthly Cost"
-            value={stats.monthlyCost !== null ? `$${stats.monthlyCost.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : null}
-            suffix="/mo"
-            empty="Add prices to estimate"
-          />
-          <StatCard
-            icon={<TrendingDown size={18} />}
-            iconBg="#3D6B40"
-            label="Potential Savings"
-            value={stats.savings !== null ? `$${stats.savings.toFixed(0)}` : null}
-            suffix="/mo"
-            empty="Add multiple vendors"
-            valueColor="#3D6B40"
           />
         </div>
       )}
@@ -187,14 +167,14 @@ export default function FoodPricingApp() {
         <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
           <div className="spinner" />
         </div>
-      ) : tab === 'upload' ? (
-        <UploadTab vendors={vendors} setIngredients={setIngredients} setTab={setTab} API={API} user={user} />
+      ) : tab === 'purchasing' ? (
+        <PurchasingTab menus={menus} ingredients={ingredients} vendors={vendors} center={center} />
       ) : tab === 'menus' ? (
         <MenusTab menus={menus} setMenus={setMenus} center={center} API={API} user={user} />
-      ) : tab === 'prices' ? (
-        <PricesTab ingredients={ingredients} setIngredients={setIngredients} vendors={vendors} API={API} user={user} />
+      ) : tab === 'recipes' ? (
+        <RecipesTab center={center} API={API} user={user} />
       ) : (
-        <CompareTab ingredients={ingredients} vendors={vendors} API={API} />
+        <InsightsTab ingredients={ingredients} vendors={vendors} API={API} />
       )}
     </div>
   )
@@ -1045,6 +1025,441 @@ function AddMenuModal({ center, API, onClose, onSaved }) {
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+// ─── Purchasing Tab ───────────────────────────────────────────────────────────
+
+function PurchasingTab({ menus, ingredients, vendors, center }) {
+  const { user, API } = useAuth()
+  const [selectedMenu, setSelectedMenu] = useState(menus[0]?.id || null)
+
+  const menu = menus.find(m => m.id === selectedMenu)
+
+  // Parse menu items and group into a shopping list by vendor
+  const shoppingList = useMemo(() => {
+    if (!menu?.items) return []
+    // Flatten all menu items into ingredient-like entries
+    const all = []
+    menu.items.forEach(item => {
+      const itemNames = item.items.split(/[,\n]+/).map(s => s.trim()).filter(Boolean)
+      itemNames.forEach(name => {
+        const ing = ingredients.find(i => i.name.toLowerCase() === name.toLowerCase())
+        if (ing && ing.prices?.length) {
+          const cheapest = [...ing.prices].sort((a, b) => a.price - b.price)[0]
+          const vendor = vendors.find(v => v.id === cheapest.vendor_id)
+          all.push({ name: ing.name, day: item.day_of_week, meal: item.meal_type, price: cheapest.price, unit: cheapest.unit, vendor: vendor?.name || 'Unknown', vendorId: cheapest.vendor_id })
+        } else {
+          all.push({ name, day: item.day_of_week, meal: item.meal_type, price: null, unit: null, vendor: null, vendorId: null })
+        }
+      })
+    })
+    return all
+  }, [menu, ingredients, vendors])
+
+  const byVendor = useMemo(() => {
+    const map = {}
+    shoppingList.forEach(item => {
+      const key = item.vendor || 'Unassigned'
+      if (!map[key]) map[key] = []
+      map[key].push(item)
+    })
+    return map
+  }, [shoppingList])
+
+  const handlePrint = () => window.print()
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: '0.375rem' }}>Select Menu Week</label>
+          <select
+            value={selectedMenu || ''}
+            onChange={e => setSelectedMenu(parseInt(e.target.value))}
+            style={{ width: '100%', padding: '0.5rem 0.875rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '0.875rem' }}
+          >
+            <option value="">— Select a menu week —</option>
+            {menus.map(m => <option key={m.id} value={m.id}>{m.week_label || `Week of ${m.week_start}`}</option>)}
+          </select>
+        </div>
+        {menu && (
+          <button className="btn btn-secondary" onClick={handlePrint} style={{ marginTop: '1.25rem' }}>
+            🖨️ Print Shopping Lists
+          </button>
+        )}
+      </div>
+
+      {!menu ? (
+        <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+          <ShoppingCart size={40} strokeWidth={1.5} style={{ margin: '0 auto 1rem', display: 'block', opacity: 0.3 }} />
+          <p>Select a menu week above to generate shopping lists.</p>
+          <p style={{ fontSize: '0.8125rem', marginTop: '0.5rem' }}>Shopping lists are automatically organized by vendor and day.</p>
+        </div>
+      ) : shoppingList.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+          <p>No ingredient data found for this menu week. Add menu items and ingredients to generate a shopping list.</p>
+        </div>
+      ) : (
+        <div>
+          <div style={{ marginBottom: '1rem', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+            {menu.week_label || `${menu.week_start} – ${menu.week_end}`} · {shoppingList.length} items
+          </div>
+          {Object.entries(byVendor).map(([vendor, items]) => (
+            <div key={vendor} className="card" style={{ marginBottom: '1rem', padding: 0, overflow: 'hidden' }}>
+              <div style={{ padding: '0.875rem 1.25rem', background: 'var(--surface)', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: '0.9rem', display: 'flex', justifyContent: 'space-between' }}>
+                <span>🛒 {vendor}</span>
+                <span style={{ fontWeight: 400, fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{items.length} items</span>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: 'var(--surface)' }}>
+                    {['Item', 'Day', 'Meal', 'Unit Price'].map(h => (
+                      <th key={h} style={{ padding: '0.5rem 1rem', textAlign: 'left', fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item, i) => (
+                    <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: '0.625rem 1rem', fontWeight: 500, fontSize: '0.875rem' }}>{item.name}</td>
+                      <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{item.day}</td>
+                      <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{item.meal}</td>
+                      <td style={{ padding: '0.625rem 1rem', fontSize: '0.8125rem' }}>
+                        {item.price !== null ? `$${item.price.toFixed(2)} / ${item.unit}` : <span style={{ color: 'var(--text-light)' }}>No price on file</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Recipes Tab ──────────────────────────────────────────────────────────────
+
+function RecipesTab({ center, API, user }) {
+  const [recipes, setRecipes] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [showAdd, setShowAdd] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [expanded, setExpanded] = useState(null)
+  const [showAll, setShowAll] = useState(false)
+
+  const load = () => {
+    const qs = showAll ? '' : `?center_id=${center?.id}`
+    fetch(`${API}/recipes${qs}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => { setRecipes(Array.isArray(d) ? d : []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [showAll, center])
+
+  const filtered = recipes.filter(r => !search || r.name.toLowerCase().includes(search.toLowerCase()) || (r.category || '').toLowerCase().includes(search.toLowerCase()))
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, position: 'relative', minWidth: 200 }}>
+          <Search size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-light)' }} />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search recipes…"
+            style={{ width: '100%', padding: '0.5rem 0.875rem 0.5rem 2.25rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '0.875rem' }}
+          />
+        </div>
+        <div style={{ display: 'flex', gap: '0.25rem', background: 'var(--border)', borderRadius: 'var(--radius-sm)', padding: '0.2rem' }}>
+          <button className="btn" onClick={() => setShowAll(false)}
+            style={{ fontSize: '0.8rem', padding: '0.3rem 0.75rem', background: !showAll ? 'white' : 'transparent', color: !showAll ? 'var(--plum)' : 'var(--text-muted)', boxShadow: !showAll ? 'var(--shadow-sm)' : 'none' }}>
+            This Center
+          </button>
+          <button className="btn" onClick={() => setShowAll(true)}
+            style={{ fontSize: '0.8rem', padding: '0.3rem 0.75rem', background: showAll ? 'white' : 'transparent', color: showAll ? 'var(--plum)' : 'var(--text-muted)', boxShadow: showAll ? 'var(--shadow-sm)' : 'none' }}>
+            All Centers
+          </button>
+        </div>
+        {user?.role === 'admin' && (
+          <button className="btn btn-primary" onClick={() => { setEditing(null); setShowAdd(true) }}>
+            <Plus size={15} /> Add Recipe
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}><div className="spinner" /></div>
+      ) : filtered.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+          <FileText size={40} strokeWidth={1.5} style={{ margin: '0 auto 1rem', display: 'block', opacity: 0.3 }} />
+          <p>{search ? 'No recipes match your search.' : 'No recipes yet. Add your first recipe to get started.'}</p>
+          {!search && user?.role === 'admin' && (
+            <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={() => setShowAdd(true)}><Plus size={15} /> Add Recipe</button>
+          )}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+          {filtered.map(recipe => {
+            const isOpen = expanded === recipe.id
+            return (
+              <div key={recipe.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <button
+                  onClick={() => setExpanded(isOpen ? null : recipe.id)}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.875rem 1.25rem', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                >
+                  <div style={{ width: 40, height: 40, borderRadius: 'var(--radius-sm)', background: 'var(--plum-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', flexShrink: 0 }}>
+                    🍽️
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>{recipe.name}</div>
+                    <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                      {recipe.category && <span style={{ marginRight: '0.75rem' }}>{recipe.category}</span>}
+                      {recipe.servings && <span>Serves {recipe.servings}</span>}
+                      {recipe.ingredients?.length > 0 && <span style={{ marginLeft: '0.75rem' }}>{recipe.ingredients.length} ingredients</span>}
+                    </div>
+                  </div>
+                  {user?.role === 'admin' && (
+                    <button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); setEditing(recipe); setShowAdd(true) }}><Edit2 size={14} /></button>
+                  )}
+                  {isOpen ? <ChevronUp size={18} color="var(--text-muted)" /> : <ChevronDown size={18} color="var(--text-muted)" />}
+                </button>
+                {isOpen && (
+                  <div style={{ borderTop: '1px solid var(--border)', padding: '1.25rem 1.5rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                    <div>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>Ingredients</div>
+                      {recipe.ingredients?.length > 0 ? (
+                        <ul style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.875rem', lineHeight: 2 }}>
+                          {recipe.ingredients.map((ing, i) => (
+                            <li key={i}><strong>{ing.quantity} {ing.unit}</strong> {ing.name}</li>
+                          ))}
+                        </ul>
+                      ) : <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>No ingredients listed.</p>}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.75rem' }}>Steps</div>
+                      {recipe.steps?.length > 0 ? (
+                        <ol style={{ margin: 0, paddingLeft: '1.25rem', fontSize: '0.875rem', lineHeight: 1.8 }}>
+                          {recipe.steps.map((step, i) => <li key={i}>{step}</li>)}
+                        </ol>
+                      ) : <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>No steps listed.</p>}
+                      {recipe.notes && <div style={{ marginTop: '1rem', background: 'var(--surface)', borderRadius: 'var(--radius-sm)', padding: '0.625rem 0.875rem', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>📝 {recipe.notes}</div>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {showAdd && (
+        <RecipeModal recipe={editing} center={center} API={API} onSaved={() => { setShowAdd(false); setEditing(null); load() }} onClose={() => { setShowAdd(false); setEditing(null) }} />
+      )}
+    </div>
+  )
+}
+
+function RecipeModal({ recipe, center, API, onSaved, onClose }) {
+  const EMPTY = { center_id: center?.id || null, name: '', category: '', servings: '', ingredients: [], steps: [], notes: '' }
+  const [form, setForm] = useState(recipe ? { ...recipe } : EMPTY)
+  const [saving, setSaving] = useState(false)
+  const [ingLine, setIngLine] = useState('')
+  const [stepLine, setStepLine] = useState('')
+  const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }))
+
+  const addIngredient = () => {
+    if (!ingLine.trim()) return
+    // parse "2 cups flour" format
+    const match = ingLine.match(/^(\d*\.?\d+)\s+(\w+)\s+(.+)$/)
+    if (match) {
+      setForm(f => ({ ...f, ingredients: [...f.ingredients, { quantity: match[1], unit: match[2], name: match[3] }] }))
+    } else {
+      setForm(f => ({ ...f, ingredients: [...f.ingredients, { quantity: '', unit: '', name: ingLine.trim() }] }))
+    }
+    setIngLine('')
+  }
+
+  const addStep = () => {
+    if (!stepLine.trim()) return
+    setForm(f => ({ ...f, steps: [...f.steps, stepLine.trim()] }))
+    setStepLine('')
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!form.name.trim()) return
+    setSaving(true)
+    if (recipe) {
+      await fetch(`${API}/recipes/${recipe.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(form) })
+    } else {
+      await fetch(`${API}/recipes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(form) })
+    }
+    onSaved()
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 640 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>{recipe ? 'Edit Recipe' : 'Add Recipe'}</h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="modal-body">
+            <div className="grid-2">
+              <div className="field" style={{ gridColumn: '1 / -1' }}>
+                <label>Recipe Name *</label>
+                <input value={form.name} onChange={set('name')} placeholder="e.g. Chicken Noodle Soup" required autoFocus />
+              </div>
+              <div className="field">
+                <label>Category</label>
+                <input value={form.category} onChange={set('category')} placeholder="e.g. Soup, Snack, Breakfast" />
+              </div>
+              <div className="field">
+                <label>Servings</label>
+                <input type="number" value={form.servings} onChange={set('servings')} placeholder="e.g. 20" />
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Ingredients <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(type "2 cups flour" format, press Enter)</span></label>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input value={ingLine} onChange={e => setIngLine(e.target.value)} placeholder="2 cups flour" onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addIngredient() }}} style={{ flex: 1, padding: '0.5rem 0.75rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '0.875rem' }} />
+                <button type="button" className="btn btn-secondary" onClick={addIngredient}><Plus size={15} /></button>
+              </div>
+              {form.ingredients.length > 0 && (
+                <ul style={{ marginTop: '0.5rem', paddingLeft: '1.25rem', fontSize: '0.875rem', lineHeight: 1.8 }}>
+                  {form.ingredients.map((ing, i) => (
+                    <li key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span>{ing.quantity} {ing.unit} {ing.name}</span>
+                      <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '0 0.25rem' }} onClick={() => setForm(f => ({ ...f, ingredients: f.ingredients.filter((_, j) => j !== i) }))}><X size={12} /></button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="field">
+              <label>Steps <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(one step at a time, press Enter)</span></label>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input value={stepLine} onChange={e => setStepLine(e.target.value)} placeholder="e.g. Preheat oven to 350°F" onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addStep() }}} style={{ flex: 1, padding: '0.5rem 0.75rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '0.875rem' }} />
+                <button type="button" className="btn btn-secondary" onClick={addStep}><Plus size={15} /></button>
+              </div>
+              {form.steps.length > 0 && (
+                <ol style={{ marginTop: '0.5rem', paddingLeft: '1.5rem', fontSize: '0.875rem', lineHeight: 1.8 }}>
+                  {form.steps.map((step, i) => (
+                    <li key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                      <span style={{ flex: 1 }}>{step}</span>
+                      <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '0 0.25rem', flexShrink: 0 }} onClick={() => setForm(f => ({ ...f, steps: f.steps.filter((_, j) => j !== i) }))}><X size={12} /></button>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+
+            <div className="field">
+              <label>Notes</label>
+              <textarea value={form.notes} onChange={set('notes')} rows={2} placeholder="Allergens, substitutions, tips…" />
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : recipe ? 'Save Changes' : 'Add Recipe'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ─── Ingredient Insights Tab ──────────────────────────────────────────────────
+
+function InsightsTab({ ingredients, vendors, API }) {
+  const [search, setSearch] = useState('')
+
+  const filtered = ingredients.filter(i => !search || i.name.toLowerCase().includes(search.toLowerCase()))
+
+  const getInsights = (ing) => {
+    if (!ing.prices?.length) return { min: null, max: null, cheapestVendor: null, vendorCount: 0 }
+    const prices = ing.prices.map(p => p.price)
+    const min = Math.min(...prices)
+    const max = Math.max(...prices)
+    const cheapestPrice = ing.prices.find(p => p.price === min)
+    const cheapestVendor = vendors.find(v => v.id === cheapestPrice?.vendor_id)
+    return { min, max, cheapestVendor: cheapestVendor?.name, vendorCount: ing.prices.length }
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', alignItems: 'center' }}>
+        <div style={{ flex: 1, position: 'relative' }}>
+          <Search size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-light)' }} />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search ingredients…"
+            style={{ width: '100%', padding: '0.5rem 0.875rem 0.5rem 2.25rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '0.875rem' }}
+          />
+        </div>
+        <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{filtered.length} ingredients</span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+          <Package size={40} strokeWidth={1.5} style={{ margin: '0 auto 1rem', display: 'block', opacity: 0.3 }} />
+          <p>No ingredients tracked yet. Add ingredients and prices to see insights.</p>
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
+              <thead>
+                <tr style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
+                  {['Ingredient', 'Category', 'Price Range (3mo)', 'Avg Weekly Δ', 'Cheapest Vendor', 'Vendors'].map(h => (
+                    <th key={h} style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((ing, i) => {
+                  const { min, max, cheapestVendor, vendorCount } = getInsights(ing)
+                  const catConf = CATEGORY_COLORS[ing.category] || CATEGORY_COLORS.general
+                  return (
+                    <tr key={ing.id} style={{ borderBottom: i < filtered.length - 1 ? '1px solid var(--border)' : 'none' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--plum-bg)'}
+                      onMouseLeave={e => e.currentTarget.style.background = ''}
+                    >
+                      <td style={{ padding: '0.75rem 1rem', fontWeight: 600, fontSize: '0.875rem' }}>{ing.name}</td>
+                      <td style={{ padding: '0.75rem 1rem' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, background: catConf.bg, color: catConf.color, padding: '0.15rem 0.5rem', borderRadius: 999 }}>
+                          {catConf.emoji} {ing.category || 'general'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                        {min !== null ? (
+                          <span style={{ color: 'var(--text)' }}>
+                            ${min.toFixed(2)} – ${max.toFixed(2)}<span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '0.25rem' }}>/{ing.unit}</span>
+                          </span>
+                        ) : <span style={{ color: 'var(--text-light)' }}>—</span>}
+                      </td>
+                      <td style={{ padding: '0.75rem 1rem', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>—</td>
+                      <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                        {cheapestVendor ? <span style={{ color: 'var(--sage)', fontWeight: 500 }}>✓ {cheapestVendor}</span> : <span style={{ color: 'var(--text-light)' }}>—</span>}
+                      </td>
+                      <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: 'var(--text-muted)' }}>{vendorCount || '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

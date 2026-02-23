@@ -4,24 +4,23 @@ import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard, ClipboardList, BookOpen, Calendar, ShieldCheck,
   UtensilsCrossed, TrendingUp, Clock, DollarSign, Users, UserSquare2,
-  LogOut, ChevronLeft, ChevronRight, Settings, Menu, X
+  LogOut, ChevronLeft, ChevronRight, Settings, Star, FileText
 } from 'lucide-react'
 
 const NAV_ITEMS = [
-  { path: '/', label: 'Dashboard', icon: LayoutDashboard, always: true },
-  { divider: 'Tools' },
-  { path: '/waitlist', label: 'Waiting List', icon: ClipboardList, always: true },
-  { path: '/calendar', label: 'Center Calendar', icon: Calendar, always: true },
-  { path: '/handbook', label: "Director's Handbook", icon: BookOpen, always: true },
-  { path: '/compliance', label: 'Teacher Compliance', icon: ShieldCheck, always: true },
-  { divider: 'Operations' },
-  { path: '/food-pricing', label: 'Food Pricing', icon: UtensilsCrossed, always: true },
-  { path: '/competitive', label: 'Competitive Analysis', icon: TrendingUp, always: true },
-  { path: '/time-off', label: 'Time Off Tracker', icon: Clock, always: true },
-  { divider: 'Admin', adminOnly: true },
+  { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/waitlist', label: 'Waiting List', icon: ClipboardList },
+  { path: '/calendar', label: 'Center Calendar', icon: Calendar },
+  { path: '/handbook', label: 'Handbooks', icon: BookOpen },
+  { path: '/compliance', label: 'Compliance', icon: ShieldCheck },
+  { path: '/food-pricing', label: 'Food Program', icon: UtensilsCrossed },
+  { path: '/competitive', label: 'Competitive Analysis', icon: TrendingUp },
+  { path: '/time-off', label: 'Time Off Tracker', icon: Clock },
+  { path: '/directory', label: 'Employee Directory', icon: UserSquare2 },
   { path: '/financials', label: 'Financial Performance', icon: DollarSign, adminOnly: true },
+  { path: '/staff-points', label: 'Staff Points', icon: Star, directorOk: true },
+  { path: '/staff-reviews', label: 'Staff Reviews', icon: FileText, directorOk: true },
   { path: '/staffing', label: 'Staffing Schedule', icon: Users, adminOnly: true },
-  { path: '/directory', label: 'Employee Directory', icon: UserSquare2, adminOnly: true },
   { path: '/users', label: 'User Management', icon: Settings, adminOnly: true },
 ]
 
@@ -76,9 +75,11 @@ export default function Layout({ children }) {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
 
-  const visibleItems = NAV_ITEMS.filter(item =>
-    !item.adminOnly || user?.role === 'admin'
-  )
+  const visibleItems = NAV_ITEMS.filter(item => {
+    if (item.adminOnly) return user?.role === 'admin'
+    if (item.directorOk) return user?.role === 'admin' || user?.role === 'director'
+    return true
+  })
 
   const sidebarContent = (
     <div style={{
@@ -115,21 +116,9 @@ export default function Layout({ children }) {
 
       {/* Nav */}
       <nav style={{ flex: 1, padding: '0 0.75rem', overflowY: 'auto' }}>
-        {visibleItems.map((item, i) => {
-          if (item.divider) {
-            if (collapsed) return null
-            return (
-              <div key={i} style={{
-                fontSize: '0.6875rem', fontWeight: 700, letterSpacing: '0.08em',
-                textTransform: 'uppercase', color: 'var(--text-light)',
-                padding: '1rem 0.25rem 0.375rem',
-              }}>
-                {item.divider}
-              </div>
-            )
-          }
-          return <NavItem key={item.path} item={item} collapsed={collapsed} />
-        })}
+        {visibleItems.map((item) => (
+          <NavItem key={item.path} item={item} collapsed={collapsed} />
+        ))}
       </nav>
 
       {/* Footer */}

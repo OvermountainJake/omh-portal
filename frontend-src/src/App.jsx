@@ -14,6 +14,8 @@ import TimeOffApp from './apps/TimeOffApp'
 import StaffingApp from './apps/StaffingApp'
 import FinancialsApp from './apps/FinancialsApp'
 import EmployeeDirectoryApp from './apps/EmployeeDirectoryApp'
+import StaffPointsApp from './apps/StaffPointsApp'
+import StaffReviewsApp from './apps/StaffReviewsApp'
 import ComingSoon from './apps/ComingSoon'
 
 function AppRoutes() {
@@ -43,6 +45,8 @@ function AppRoutes() {
         <Route path="/financials" element={user?.role === 'admin' ? <FinancialsApp /> : <Navigate to="/" />} />
         <Route path="/staffing" element={<StaffingApp />} />
         <Route path="/directory" element={<EmployeeDirectoryApp />} />
+        <Route path="/staff-points" element={(user?.role === 'admin' || user?.role === 'director') ? <StaffPointsApp /> : <Navigate to="/" />} />
+        <Route path="/staff-reviews" element={(user?.role === 'admin' || user?.role === 'director') ? <StaffReviewsApp /> : <Navigate to="/" />} />
         <Route path="/users" element={user.role === 'admin' ? <UsersApp /> : <Navigate to="/" />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>

@@ -296,10 +296,77 @@ if (compCount === 0) {
   console.log('✓ Seeded compliance requirements');
 }
 
+// ─── New tables ───────────────────────────────────────────────────────────────
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS recipes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    center_id   INTEGER REFERENCES centers(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    category    TEXT,
+    servings    INTEGER DEFAULT 1,
+    ingredients TEXT DEFAULT '[]',
+    steps       TEXT DEFAULT '[]',
+    notes       TEXT,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS center_compliance (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    center_id    INTEGER NOT NULL REFERENCES centers(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    type         TEXT DEFAULT 'licensing',
+    description  TEXT,
+    state        TEXT,
+    due_date     DATE,
+    completed_date DATE,
+    recurs       TEXT DEFAULT 'annual',
+    notes        TEXT,
+    created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS staff_points (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id    INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    type        TEXT NOT NULL,
+    points      INTEGER NOT NULL,
+    notes       TEXT,
+    recorded_by INTEGER,
+    event_date  DATE DEFAULT (date('now')),
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS staff_reviews (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id      INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
+    review_period TEXT NOT NULL,
+    positives     TEXT,
+    growth_areas  TEXT,
+    focus_areas   TEXT,
+    notes         TEXT,
+    reviewed_by   INTEGER,
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS handbook_documents (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    type       TEXT NOT NULL CHECK(type IN ('director','staff','parent')),
+    title      TEXT NOT NULL,
+    file_url   TEXT,
+    notes      TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
 // ─── Safe migrations (add columns if missing) ─────────────────────────────────
 const safeAlter = (sql) => { try { db.exec(sql); } catch(e) {} };
 safeAlter('ALTER TABLE calendar_events ADD COLUMN start_time TEXT');
 safeAlter('ALTER TABLE calendar_events ADD COLUMN end_time TEXT');
 safeAlter('ALTER TABLE calendar_events ADD COLUMN location TEXT');
+safeAlter('ALTER TABLE waitlist_entries ADD COLUMN is_expected INTEGER DEFAULT 0');
+safeAlter('ALTER TABLE competitors ADD COLUMN rates_published INTEGER DEFAULT 1');
 
 module.exports = db;
