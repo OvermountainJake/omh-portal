@@ -298,6 +298,117 @@ app.delete('/api/competitors/:id', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// Update rates_published flag
+app.patch('/api/competitors/:id', requireAuth, requireAdmin, (req, res) => {
+  const updates = []
+  const params = []
+  if (req.body.rates_published !== undefined) { updates.push('rates_published=?'); params.push(req.body.rates_published ? 1 : 0) }
+  if (req.body.notes !== undefined) { updates.push('notes=?'); params.push(req.body.notes) }
+  if (!updates.length) return res.status(400).json({ error: 'Nothing to update' })
+  params.push(req.params.id)
+  db.prepare(`UPDATE competitors SET ${updates.join(',')},updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(...params)
+  res.json({ ok: true })
+})
+
+// ─── Google Places — Auto-discover nearby daycares ────────────────────────────
+
+async function placesNearbySearch(lat, lng, radiusMeters, apiKey) {
+  const https = require('https')
+  return new Promise((resolve) => {
+    const path = `/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radiusMeters}&type=child_care_agency&key=${apiKey}`
+    const req = https.request({ hostname: 'maps.googleapis.com', path, method: 'GET' }, res => {
+      let d = ''
+      res.on('data', c => d += c)
+      res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve({ results: [] }) } })
+    })
+    req.on('error', () => resolve({ results: [] }))
+    req.end()
+  })
+}
+
+async function placesTextSearch(query, lat, lng, apiKey) {
+  const https = require('https')
+  return new Promise((resolve) => {
+    const path = `/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&location=${lat},${lng}&radius=48280&key=${apiKey}`
+    const req = https.request({ hostname: 'maps.googleapis.com', path, method: 'GET' }, res => {
+      let d = ''
+      res.on('data', c => d += c)
+      res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve({ results: [] }) } })
+    })
+    req.on('error', () => resolve({ results: [] }))
+    req.end()
+  })
+}
+
+app.post('/api/centers/:centerId/discover-competitors', requireAuth, requireAdmin, async (req, res) => {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY
+  if (!apiKey) return res.status(503).json({ error: 'GOOGLE_MAPS_API_KEY not configured in environment variables' })
+
+  const center = db.prepare('SELECT * FROM centers WHERE id=?').get(req.params.centerId)
+  if (!center) return res.status(404).json({ error: 'Center not found' })
+  if (!center.lat || !center.lng) return res.status(400).json({ error: 'Center has no coordinates. Add lat/lng to this center first.' })
+
+  const radiusMiles = parseInt(req.body.radius_miles) || 30
+  const radiusMeters = radiusMiles * 1609
+
+  try {
+    // Search using Google Places
+    const [nearbyRes, textRes] = await Promise.all([
+      placesNearbySearch(center.lat, center.lng, radiusMeters, apiKey),
+      placesTextSearch('daycare child care preschool', center.lat, center.lng, apiKey),
+    ])
+
+    const allResults = [...(nearbyRes.results || []), ...(textRes.results || [])]
+
+    // Deduplicate by place_id
+    const seen = new Set()
+    const unique = allResults.filter(r => {
+      if (seen.has(r.place_id)) return false
+      seen.add(r.place_id)
+      return true
+    })
+
+    // Get existing competitor names (for duplicate detection)
+    const existing = db.prepare('SELECT name FROM competitors WHERE center_id=?').all(req.params.centerId).map(r => r.name.toLowerCase())
+
+    const discovered = unique.map(place => {
+      const addressParts = (place.vicinity || place.formatted_address || '').split(',')
+      const city = addressParts.length >= 2 ? addressParts[addressParts.length - 2]?.trim() : center.city
+      const stateZip = addressParts[addressParts.length - 1]?.trim() || ''
+      const stateMatch = stateZip.match(/([A-Z]{2})\s*(\d{5})?/)
+      const state = stateMatch?.[1] || center.state
+      const zip = stateMatch?.[2] || null
+
+      // Compute distance (Haversine)
+      const R = 3958.8
+      const dLat = (place.geometry.location.lat - center.lat) * Math.PI / 180
+      const dLon = (place.geometry.location.lng - center.lng) * Math.PI / 180
+      const a = Math.sin(dLat/2)**2 + Math.cos(center.lat*Math.PI/180) * Math.cos(place.geometry.location.lat*Math.PI/180) * Math.sin(dLon/2)**2
+      const distanceMiles = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+
+      return {
+        place_id: place.place_id,
+        name: place.name,
+        address: place.vicinity || place.formatted_address,
+        city: city || center.city,
+        state: state || center.state,
+        zip,
+        lat: place.geometry.location.lat,
+        lng: place.geometry.location.lng,
+        rating: place.rating,
+        distance_miles: Math.round(distanceMiles * 10) / 10,
+        already_tracked: existing.includes(place.name.toLowerCase()),
+        rates_published: false, // unknown — admin must update
+      }
+    }).filter(p => p.distance_miles <= radiusMiles)
+      .sort((a, b) => a.distance_miles - b.distance_miles)
+
+    res.json({ found: discovered.length, results: discovered, center_name: center.name, radius_miles: radiusMiles })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Food Pricing ──────────────────────────────────────────────────────────────
 
 app.get('/api/vendors', requireAuth, (req, res) => {
