@@ -778,6 +778,97 @@ app.post('/api/ingredients/parse-list', requireAuth, (req, res) => {
   res.json({ items, count: items.length });
 });
 
+// ─── Price Auto-Refresh ────────────────────────────────────────────────────────
+
+const PRICE_REFRESH_LOCATION = 'Appleton WI';
+const PRICE_REFRESH_COOLDOWN_HOURS = 24;
+
+function getSetting(key) { return db.prepare('SELECT value FROM settings WHERE key=?').get(key)?.value || null; }
+function setSetting(key, val) { db.prepare('INSERT OR REPLACE INTO settings (key,value) VALUES (?,?)').run(key, val); }
+
+app.get('/api/ingredients/refresh-status', requireAuth, (req, res) => {
+  const status    = getSetting('price_refresh_status') || 'idle';
+  const last      = getSetting('last_price_refresh');
+  const summary   = getSetting('price_refresh_summary');
+  const hoursAgo  = last ? (Date.now() - new Date(last).getTime()) / 3600000 : null;
+  const canRefresh = !last || hoursAgo >= PRICE_REFRESH_COOLDOWN_HOURS;
+  res.json({ status, lastRefresh: last, canRefresh, hoursUntilNext: canRefresh ? 0 : Math.ceil(PRICE_REFRESH_COOLDOWN_HOURS - hoursAgo), summary: summary ? JSON.parse(summary) : null });
+});
+
+app.post('/api/ingredients/refresh-prices', requireAuth, requireAdmin, async (req, res) => {
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set in Railway env vars.' });
+  if (!process.env.BRAVE_SEARCH_API_KEY) return res.status(503).json({ error: 'BRAVE_SEARCH_API_KEY not set in Railway env vars.' });
+
+  const last = getSetting('last_price_refresh');
+  const status = getSetting('price_refresh_status');
+  if (status === 'running') return res.status(429).json({ error: 'A price refresh is already in progress.' });
+  if (last) {
+    const hoursAgo = (Date.now() - new Date(last).getTime()) / 3600000;
+    if (hoursAgo < PRICE_REFRESH_COOLDOWN_HOURS)
+      return res.status(429).json({ error: `Prices were refreshed ${Math.round(hoursAgo)}h ago. Next refresh available in ${Math.ceil(PRICE_REFRESH_COOLDOWN_HOURS - hoursAgo)}h.`, lastRefresh: last });
+  }
+
+  setSetting('price_refresh_status', 'running');
+  res.json({ status: 'started' });
+
+  // Run in background
+  runPriceRefresh().catch(err => {
+    console.error('Price refresh error:', err);
+    setSetting('price_refresh_status', 'error');
+  });
+});
+
+async function runPriceRefresh() {
+  const ingredients = db.prepare('SELECT * FROM ingredients ORDER BY name').all();
+  const vendors = db.prepare('SELECT * FROM vendors ORDER BY name').all();
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const vendorNames = vendors.map(v => v.name).join(', ');
+  let updated = 0, failed = 0;
+
+  for (const ingredient of ingredients) {
+    try {
+      // Search Brave
+      const q = encodeURIComponent(`${ingredient.name} grocery price ${PRICE_REFRESH_LOCATION}`);
+      const searchRes = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${q}&count=5`, {
+        headers: { 'Accept': 'application/json', 'X-Subscription-Token': process.env.BRAVE_SEARCH_API_KEY }
+      });
+      const searchData = await searchRes.json();
+      const snippets = (searchData.web?.results || []).slice(0, 5).map(r => `${r.title}: ${r.description}`).join('\n');
+      if (!snippets) { failed++; continue; }
+
+      // Parse with Claude
+      const msg = await anthropic.messages.create({
+        model: 'claude-haiku-4-5',
+        max_tokens: 256,
+        system: `You are a grocery price estimator. Given search results, estimate the current retail price for "${ingredient.name}" in ${PRICE_REFRESH_LOCATION} at each of these stores: ${vendorNames}.
+Return ONLY valid JSON like: {"Aldi": 1.29, "Walmart": 1.49}
+Use null for stores you cannot estimate. Prices should be per ${ingredient.unit || 'unit'}. No markdown.`,
+        messages: [{ role: 'user', content: snippets }]
+      });
+
+      const raw = msg.content[0].text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+      const prices = JSON.parse(raw);
+
+      for (const vendor of vendors) {
+        const price = prices[vendor.name];
+        if (price !== null && price !== undefined && !isNaN(Number(price))) {
+          db.prepare('DELETE FROM ingredient_prices WHERE ingredient_id=? AND vendor_id=? AND center_id IS NULL').run(ingredient.id, vendor.id);
+          db.prepare('INSERT INTO ingredient_prices (ingredient_id,vendor_id,center_id,price,unit,recorded_at) VALUES (?,?,NULL,?,?,DATE("now"))').run(ingredient.id, vendor.id, Number(price), ingredient.unit || 'each');
+          updated++;
+        }
+      }
+    } catch (err) {
+      console.error(`Price refresh failed for ${ingredient.name}:`, err.message);
+      failed++;
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  setSetting('last_price_refresh', new Date().toISOString());
+  setSetting('price_refresh_status', 'done');
+  setSetting('price_refresh_summary', JSON.stringify({ updated, failed, total: ingredients.length }));
+}
+
 // ─── Recipes ──────────────────────────────────────────────────────────────────
 
 app.post('/api/recipes/parse-document', requireAuth, requireAdmin, upload.single('file'), async (req, res) => {

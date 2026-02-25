@@ -359,6 +359,11 @@ db.exec(`
     notes      TEXT,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+  );
 `);
 
 // ─── Safe migrations (add columns if missing) ─────────────────────────────────

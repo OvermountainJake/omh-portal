@@ -730,6 +730,55 @@ function PricesTab({ ingredients, setIngredients, vendors, API, user }) {
   const [editing, setEditing] = useState(null)
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
+  const [refreshStatus, setRefreshStatus] = useState({ status: 'idle', canRefresh: true, hoursUntilNext: 0, lastRefresh: null, summary: null })
+  const [refreshError, setRefreshError] = useState('')
+  const pollRef = useRef(null)
+
+  // Load refresh status on mount
+  useEffect(() => {
+    fetch(`${API}/ingredients/refresh-status`, { credentials: 'include' })
+      .then(r => r.json()).then(setRefreshStatus).catch(() => {})
+  }, [API])
+
+  // Poll while running
+  useEffect(() => {
+    if (refreshStatus.status === 'running') {
+      pollRef.current = setInterval(() => {
+        fetch(`${API}/ingredients/refresh-status`, { credentials: 'include' })
+          .then(r => r.json()).then(d => {
+            setRefreshStatus(d)
+            if (d.status !== 'running') {
+              clearInterval(pollRef.current)
+              // Reload ingredient prices after refresh
+              if (d.status === 'done') {
+                fetch(`${API}/ingredients`, { credentials: 'include' }).then(r => r.json()).then(data => {
+                  if (Array.isArray(data)) setIngredients(data)
+                }).catch(() => {})
+              }
+            }
+          }).catch(() => {})
+      }, 3000)
+    }
+    return () => clearInterval(pollRef.current)
+  }, [refreshStatus.status, API, setIngredients])
+
+  const handleRefresh = async () => {
+    setRefreshError('')
+    try {
+      const res = await fetch(`${API}/ingredients/refresh-prices`, { method: 'POST', credentials: 'include' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setRefreshStatus(s => ({ ...s, status: 'running' }))
+    } catch (err) {
+      setRefreshError(err.message)
+    }
+  }
+
+  const formatLastRefresh = (iso) => {
+    if (!iso) return null
+    const d = new Date(iso)
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  }
 
   const categories = useMemo(() => {
     const cats = new Set(ingredients.map(i => i.category).filter(Boolean))
@@ -758,11 +807,47 @@ function PricesTab({ ingredients, setIngredients, vendors, API, user }) {
           />
         </div>
         {user?.role === 'admin' && (
-          <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>
-            <Plus size={14} /> Add Ingredient
-          </button>
+          <>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={handleRefresh}
+              disabled={!refreshStatus.canRefresh || refreshStatus.status === 'running'}
+              title={!refreshStatus.canRefresh ? `Next refresh in ${refreshStatus.hoursUntilNext}h` : 'Fetch current prices from web for all ingredients & vendors'}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}
+            >
+              <TrendingDown size={14} style={{ transform: refreshStatus.status === 'running' ? 'none' : undefined }} />
+              {refreshStatus.status === 'running' ? 'Refreshing…' : !refreshStatus.canRefresh ? `Refresh in ${refreshStatus.hoursUntilNext}h` : 'Refresh Prices'}
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>
+              <Plus size={14} /> Add Ingredient
+            </button>
+          </>
         )}
       </div>
+
+      {/* Refresh status bar */}
+      {refreshError && (
+        <div style={{ background: '#FFF1F2', borderLeft: '4px solid #F43F5E', color: '#BE123C', padding: '0.625rem 1rem', borderRadius: 'var(--radius-sm)', marginBottom: '0.75rem', fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <AlertCircle size={14} /> {refreshError}
+          <button onClick={() => setRefreshError('')} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#BE123C' }}><X size={13} /></button>
+        </div>
+      )}
+      {refreshStatus.status === 'running' && (
+        <div style={{ background: '#EFF6FF', borderLeft: '4px solid #3B82F6', color: '#1D4ED8', padding: '0.625rem 1rem', borderRadius: 'var(--radius-sm)', marginBottom: '0.75rem', fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Fetching prices for all ingredients and vendors — this takes a minute…
+        </div>
+      )}
+      {refreshStatus.status === 'done' && refreshStatus.summary && (
+        <div style={{ background: '#ECFDF5', borderLeft: '4px solid #10B981', color: '#065F46', padding: '0.625rem 1rem', borderRadius: 'var(--radius-sm)', marginBottom: '0.75rem', fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <CheckCircle2 size={14} /> Prices updated — {refreshStatus.summary.updated} prices refreshed across {refreshStatus.summary.total} ingredients.
+          {refreshStatus.lastRefresh && <span style={{ marginLeft: 'auto', opacity: 0.7 }}>Last updated {formatLastRefresh(refreshStatus.lastRefresh)}</span>}
+        </div>
+      )}
+      {refreshStatus.lastRefresh && refreshStatus.status !== 'running' && refreshStatus.status !== 'done' && (
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+          Prices last refreshed {formatLastRefresh(refreshStatus.lastRefresh)}
+        </div>
+      )}
 
       {/* Category Filter Pills */}
       <div style={{ display: 'flex', gap: '0.375rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
