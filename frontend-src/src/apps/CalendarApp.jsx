@@ -176,16 +176,16 @@ export default function CalendarApp() {
           {view === 'month' ? (
             <>
               {/* Day headers */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
                 {DAYS_SHORT.map(d => (
                   <div key={d} style={{ padding: '0.625rem 0.5rem', textAlign: 'center', fontSize: '0.6875rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{d}</div>
                 ))}
               </div>
 
               {/* Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))' }}>
                 {Array.from({ length: firstDay }).map((_, i) => (
-                  <div key={`empty-${i}`} style={{ minHeight: 110, borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }} />
+                  <div key={`empty-${i}`} style={{ minHeight: 110, borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', background: 'var(--surface)', overflow: 'hidden' }} />
                 ))}
                 {Array.from({ length: daysInMonth }).map((_, i) => {
                   const day = i + 1
@@ -205,6 +205,7 @@ export default function CalendarApp() {
                         background: selected ? 'var(--plum-bg)' : 'transparent',
                         transition: 'background 0.1s',
                         position: 'relative',
+                        overflow: 'hidden',
                       }}
                       onMouseEnter={e => { if (!selected) e.currentTarget.style.background = 'var(--surface)' }}
                       onMouseLeave={e => { if (!selected) e.currentTarget.style.background = 'transparent' }}
