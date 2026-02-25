@@ -844,12 +844,21 @@ app.get('/api/recipes', requireAuth, (req, res) => {
   })));
 });
 
+function syncRecipeIngredients(ingredients) {
+  const ins = db.prepare('INSERT OR IGNORE INTO ingredients (name) VALUES (?)');
+  (ingredients || []).forEach(ing => {
+    const n = (ing.name || '').trim();
+    if (n) ins.run(n);
+  });
+}
+
 app.post('/api/recipes', requireAuth, requireAdmin, (req, res) => {
   const { center_id, name, category, servings, ingredients, steps, notes } = req.body;
   if (!name) return res.status(400).json({ error: 'Name required' });
   const r = db.prepare('INSERT INTO recipes (center_id,name,category,servings,ingredients,steps,notes) VALUES (?,?,?,?,?,?,?)')
     .run(center_id || null, name, category || null, servings || 1,
          JSON.stringify(ingredients || []), JSON.stringify(steps || []), notes || null);
+  syncRecipeIngredients(ingredients);
   res.json(db.prepare('SELECT * FROM recipes WHERE id=?').get(r.lastInsertRowid));
 });
 
@@ -858,6 +867,7 @@ app.put('/api/recipes/:id', requireAuth, requireAdmin, (req, res) => {
   db.prepare('UPDATE recipes SET name=?,category=?,servings=?,ingredients=?,steps=?,notes=?,updated_at=datetime("now") WHERE id=?')
     .run(name, category || null, servings || 1,
          JSON.stringify(ingredients || []), JSON.stringify(steps || []), notes || null, req.params.id);
+  syncRecipeIngredients(ingredients);
   res.json({ ok: true });
 });
 
