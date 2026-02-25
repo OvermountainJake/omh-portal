@@ -391,15 +391,22 @@ async function seedIfEmpty() {
 let initialized = false;
 async function ensureReady() {
   if (initialized) return;
-  await initSchema();
-  await seedIfEmpty();
-  initialized = true;
-  console.log('✓ Database ready');
+  if (!process.env.DATABASE_URL) {
+    console.error('❌ DATABASE_URL is not set. In Railway: go to your web service → Variables → add DATABASE_URL referencing your Postgres service.');
+    process.exit(1);
+  }
+  try {
+    await initSchema();
+    await seedIfEmpty();
+    initialized = true;
+    console.log('✓ Database ready (PostgreSQL)');
+  } catch (err) {
+    console.error('❌ Database init failed:', err.message);
+    console.error('   Check that DATABASE_URL is set and the Postgres service is running.');
+    process.exit(1);
+  }
 }
 
-ensureReady().catch(err => {
-  console.error('Database init failed:', err.message);
-  process.exit(1);
-});
+ensureReady();
 
 module.exports = db;
