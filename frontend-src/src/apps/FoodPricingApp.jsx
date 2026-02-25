@@ -1332,7 +1332,7 @@ function RecipeModal({ recipe, center, API, onSaved, onClose }) {
     e.preventDefault()
     if (!form.name.trim()) return
     setSaving(true)
-    if (recipe) {
+    if (recipe?.id) {
       await fetch(`${API}/recipes/${recipe.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(form) })
     } else {
       await fetch(`${API}/recipes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(form) })
