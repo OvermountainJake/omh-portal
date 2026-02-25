@@ -819,7 +819,8 @@ Rules:
       messages: [{ role: 'user', content: text.slice(0, 8000) }]
     });
 
-    const parsed = JSON.parse(message.content[0].text);
+    const raw = message.content[0].text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+    const parsed = JSON.parse(raw);
     res.json(parsed);
   } catch (err) {
     console.error('Recipe parse error:', err);
