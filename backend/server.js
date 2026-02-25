@@ -424,8 +424,13 @@ app.get('/api/vendors', requireAuth, (req, res) => {
 app.post('/api/vendors', requireAuth, requireAdmin, (req, res) => {
   const { name, type, notes } = req.body;
   if (!name) return res.status(400).json({ error: 'Vendor name required' });
-  const r = db.prepare('INSERT INTO vendors (name, type, notes) VALUES (?,?,?)').run(name, type || 'grocery', notes);
+  const r = db.prepare('INSERT INTO vendors (name, type, notes) VALUES (?,?,?)').run(name, type || 'grocery', notes || null);
   res.json(db.prepare('SELECT * FROM vendors WHERE id = ?').get(r.lastInsertRowid));
+});
+
+app.delete('/api/vendors/:id', requireAuth, requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM vendors WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
 });
 
 app.get('/api/ingredients', requireAuth, (req, res) => {

@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import {
   Plus, ChevronDown, ChevronUp, TrendingDown, UtensilsCrossed,
   DollarSign, X, Edit2, Upload, Search, BarChart3, Package,
-  ShoppingCart, Leaf, AlertCircle, CheckCircle2, FileText
+  ShoppingCart, Leaf, AlertCircle, CheckCircle2, FileText, Trash2
 } from 'lucide-react'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
@@ -31,6 +31,7 @@ export default function FoodPricingApp() {
   const { user, API } = useAuth()
   const center = user?.centers?.[0]
   const [tab, setTab] = useState('purchasing')
+  const [showVendorList, setShowVendorList] = useState(false)
   const [menus, setMenus] = useState([])
   const [ingredients, setIngredients] = useState([])
   const [vendors, setVendors] = useState([])
@@ -118,6 +119,7 @@ export default function FoodPricingApp() {
             value={stats.totalVendors}
             suffix=""
             empty="0"
+            onClick={() => setShowVendorList(true)}
           />
         </div>
       )}
@@ -176,24 +178,153 @@ export default function FoodPricingApp() {
       ) : (
         <InsightsTab ingredients={ingredients} vendors={vendors} API={API} />
       )}
+
+      {showVendorList && (
+        <VendorListModal
+          vendors={vendors}
+          setVendors={setVendors}
+          user={user}
+          API={API}
+          onClose={() => setShowVendorList(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Vendor List Modal ──────────────────────────────────────────────────────────
+
+const VENDOR_TYPES = ['grocery', 'wholesale', 'distributor', 'local']
+
+function VendorListModal({ vendors, setVendors, user, API, onClose }) {
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ name: '', type: 'grocery', notes: '' })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleAdd = async (e) => {
+    e.preventDefault()
+    setSaving(true); setError('')
+    try {
+      const res = await fetch(`${API}/vendors`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to add vendor')
+      setVendors(v => [...v, data])
+      setForm({ name: '', type: 'grocery', notes: '' })
+      setAdding(false)
+    } catch (err) { setError(err.message) }
+    finally { setSaving(false) }
+  }
+
+  const handleDelete = async (id) => {
+    if (!confirm('Remove this vendor?')) return
+    await fetch(`${API}/vendors/${id}`, { method: 'DELETE', credentials: 'include' })
+    setVendors(v => v.filter(v => v.id !== id))
+  }
+
+  const typeColor = { grocery: '#10B981', wholesale: '#3B82F6', distributor: '#8B5CF6', local: '#F59E0B' }
+  const typeBg   = { grocery: '#ECFDF5', wholesale: '#EFF6FF', distributor: '#F5F3FF', local: '#FFFBEB' }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+        <div className="modal-header">
+          <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <ShoppingCart size={18} style={{ color: 'var(--sage)' }} /> Vendors on File
+          </h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={16} /></button>
+        </div>
+
+        <div className="modal-body" style={{ padding: 0 }}>
+          {vendors.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No vendors yet.</div>
+          ) : (
+            <div>
+              {vendors.map((v, i) => (
+                <div key={v.id} style={{
+                  display: 'flex', alignItems: 'center', gap: '0.875rem',
+                  padding: '0.75rem 1.25rem',
+                  borderBottom: i < vendors.length - 1 ? '1px solid var(--border)' : 'none',
+                }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.9375rem', color: 'var(--text)' }}>{v.name}</div>
+                    {v.notes && <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.125rem' }}>{v.notes}</div>}
+                  </div>
+                  <span style={{
+                    fontSize: '0.7rem', fontWeight: 700, padding: '0.2rem 0.625rem',
+                    borderRadius: 999, textTransform: 'capitalize',
+                    background: typeBg[v.type] || '#F9FAFB',
+                    color: typeColor[v.type] || '#6B7280',
+                    border: `1px solid ${typeColor[v.type] || '#D1D5DB'}`,
+                  }}>{v.type}</span>
+                  {user?.role === 'admin' && (
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(v.id)} style={{ color: 'var(--text-muted)' }}>
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {user?.role === 'admin' && adding && (
+            <form onSubmit={handleAdd} style={{ padding: '1rem 1.25rem', borderTop: '1px solid var(--border)', background: 'var(--surface)' }}>
+              {error && <div style={{ color: '#BE123C', fontSize: '0.8125rem', marginBottom: '0.5rem' }}>{error}</div>}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Vendor name" required autoFocus
+                  style={{ padding: '0.5rem 0.75rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '0.875rem' }} />
+                <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}
+                  style={{ padding: '0.5rem 0.75rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '0.875rem' }}>
+                  {VENDOR_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Notes (optional)"
+                style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '0.875rem', marginBottom: '0.5rem', boxSizing: 'border-box' }} />
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setAdding(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>{saving ? 'Saving…' : 'Add Vendor'}</button>
+              </div>
+            </form>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          {user?.role === 'admin' && !adding && (
+            <button className="btn btn-secondary btn-sm" onClick={() => setAdding(true)}><Plus size={14} /> Add Vendor</button>
+          )}
+          <div style={{ flex: 1 }} />
+          <button className="btn btn-primary" onClick={onClose}>Done</button>
+        </div>
+      </div>
     </div>
   )
 }
 
 // ── Stat Card ──────────────────────────────────────────────────────────────────
 
-function StatCard({ icon, iconBg, label, value, suffix, empty, valueColor }) {
+function StatCard({ icon, iconBg, label, value, suffix, empty, valueColor, onClick }) {
   return (
-    <div style={{
-      background: 'var(--white)',
-      border: '1px solid var(--border)',
-      borderRadius: 'var(--radius)',
-      padding: '1rem 1.25rem',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.875rem',
-      boxShadow: 'var(--shadow-sm)',
-    }}>
+    <div
+      onClick={onClick}
+      style={{
+        background: 'var(--white)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius)',
+        padding: '1rem 1.25rem',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.875rem',
+        boxShadow: 'var(--shadow-sm)',
+        cursor: onClick ? 'pointer' : 'default',
+        transition: onClick ? 'box-shadow 0.15s, border-color 0.15s' : undefined,
+      }}
+      onMouseEnter={onClick ? e => { e.currentTarget.style.boxShadow = 'var(--shadow)'; e.currentTarget.style.borderColor = 'var(--plum)' } : undefined}
+      onMouseLeave={onClick ? e => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; e.currentTarget.style.borderColor = 'var(--border)' } : undefined}
+    >
       <div style={{
         width: 38, height: 38,
         background: iconBg,
