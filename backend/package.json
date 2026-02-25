@@ -16,6 +16,8 @@
     "googleapis": "^171.4.0",
     "jsonwebtoken": "^9.0.2",
     "mammoth": "^1.11.0",
+    "multer": "^2.0.2",
+    "openai": "^6.25.0",
     "pdf-parse": "^2.4.5"
   },
   "devDependencies": {

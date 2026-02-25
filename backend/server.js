@@ -6,6 +6,12 @@ const path = require('path');
 const fs = require('fs');
 const db = require('./database');
 const { signToken, requireAuth, requireAdmin, requireCenterAccess, COOKIE_NAME, SESSION_DAYS } = require('./auth');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
+const { OpenAI } = require('openai');
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -768,6 +774,63 @@ app.post('/api/ingredients/parse-list', requireAuth, (req, res) => {
 });
 
 // ─── Recipes ──────────────────────────────────────────────────────────────────
+
+app.post('/api/recipes/parse-document', requireAuth, requireAdmin, upload.single('file'), async (req, res) => {
+  if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: 'AI parsing not configured — add OPENAI_API_KEY to Railway env vars.' });
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
+
+  try {
+    let text = '';
+    const mime = req.file.mimetype;
+    const name = req.file.originalname.toLowerCase();
+
+    if (mime === 'application/pdf' || name.endsWith('.pdf')) {
+      const data = await pdfParse(req.file.buffer);
+      text = data.text;
+    } else if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || name.endsWith('.docx')) {
+      const result = await mammoth.extractRawText({ buffer: req.file.buffer });
+      text = result.value;
+    } else if (name.endsWith('.doc')) {
+      return res.status(400).json({ error: 'Legacy .doc files are not supported. Please save as .docx and try again.' });
+    } else {
+      return res.status(400).json({ error: 'Unsupported file type. Please upload a PDF or Word document.' });
+    }
+
+    if (!text.trim()) return res.status(400).json({ error: 'Could not extract text from document.' });
+
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: `You are a recipe parser for a childcare company's food program. Extract recipe data from the provided text and return ONLY valid JSON with this exact structure:
+{
+  "name": "Recipe name",
+  "category": "one of: Breakfast, Lunch, Dinner, Snack, Dessert — pick the best fit or null",
+  "servings": <integer or null>,
+  "ingredients": [{"quantity": "1", "unit": "cup", "name": "all-purpose flour"}, ...],
+  "steps": ["Step 1 text", "Step 2 text", ...],
+  "notes": "any notes, allergen info, or storage instructions — or null"
+}
+Rules:
+- If multiple recipes are present, return only the first/main one.
+- For ingredients: split quantity and unit from the ingredient name. quantity and unit may be null if not listed.
+- Steps should be clean, readable sentences.
+- Do not include markdown, only JSON.`
+        },
+        { role: 'user', content: text.slice(0, 8000) }
+      ]
+    });
+
+    const parsed = JSON.parse(completion.choices[0].message.content);
+    res.json(parsed);
+  } catch (err) {
+    console.error('Recipe parse error:', err);
+    res.status(500).json({ error: 'Failed to parse document: ' + err.message });
+  }
+});
 
 app.get('/api/recipes', requireAuth, (req, res) => {
   const { center_id } = req.query;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useAuth } from '../context/AuthContext'
 import {
   Plus, ChevronDown, ChevronUp, TrendingDown, UtensilsCrossed,
@@ -1151,6 +1151,31 @@ function RecipesTab({ center, API, user }) {
   const [editing, setEditing] = useState(null)
   const [expanded, setExpanded] = useState(null)
   const [showAll, setShowAll] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState('')
+  const fileInputRef = useRef(null)
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setImporting(true)
+    setImportError('')
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await fetch(`${API}/recipes/parse-document`, { method: 'POST', body: fd, credentials: 'include' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Parse failed')
+      // pre-fill the recipe form with parsed data
+      setEditing({ ...data, center_id: center?.id || null, _parsed: true })
+      setShowAdd(true)
+    } catch (err) {
+      setImportError(err.message)
+    } finally {
+      setImporting(false)
+    }
+  }
 
   const load = () => {
     const qs = showAll ? '' : `?center_id=${center?.id}`
@@ -1186,11 +1211,24 @@ function RecipesTab({ center, API, user }) {
           </button>
         </div>
         {user?.role === 'admin' && (
-          <button className="btn btn-primary" onClick={() => { setEditing(null); setShowAdd(true) }}>
-            <Plus size={15} /> Add Recipe
-          </button>
+          <>
+            <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()} disabled={importing}>
+              <Upload size={15} /> {importing ? 'Parsing…' : 'Import from Doc'}
+            </button>
+            <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx" style={{ display: 'none' }} onChange={handleImportFile} />
+            <button className="btn btn-primary" onClick={() => { setEditing(null); setShowAdd(true) }}>
+              <Plus size={15} /> Add Recipe
+            </button>
+          </>
         )}
       </div>
+
+      {importError && (
+        <div style={{ background: '#FFF1F2', borderLeft: '4px solid #F43F5E', color: '#BE123C', padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)', marginBottom: '1rem', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <AlertCircle size={15} /> {importError}
+          <button onClick={() => setImportError('')} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#BE123C' }}><X size={14} /></button>
+        </div>
+      )}
 
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}><div className="spinner" /></div>
@@ -1306,7 +1344,7 @@ function RecipeModal({ recipe, center, API, onSaved, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 640 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>{recipe ? 'Edit Recipe' : 'Add Recipe'}</h2>
+          <h2>{recipe?.id ? 'Edit Recipe' : recipe?._parsed ? 'Review Imported Recipe' : 'Add Recipe'}</h2>
           <button className="btn btn-ghost btn-sm" onClick={onClose}><X size={16} /></button>
         </div>
         <form onSubmit={handleSubmit}>
@@ -1369,7 +1407,7 @@ function RecipeModal({ recipe, center, API, onSaved, onClose }) {
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : recipe ? 'Save Changes' : 'Add Recipe'}</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : recipe?.id ? 'Save Changes' : 'Add Recipe'}</button>
           </div>
         </form>
       </div>
