@@ -9,7 +9,7 @@ const { signToken, requireAuth, requireAdmin, requireCenterAccess, COOKIE_NAME, 
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
-const { OpenAI } = require('openai');
+const Anthropic = require('@anthropic-ai/sdk');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -776,7 +776,7 @@ app.post('/api/ingredients/parse-list', requireAuth, (req, res) => {
 // ─── Recipes ──────────────────────────────────────────────────────────────────
 
 app.post('/api/recipes/parse-document', requireAuth, requireAdmin, upload.single('file'), async (req, res) => {
-  if (!process.env.OPENAI_API_KEY) return res.status(503).json({ error: 'AI parsing not configured — add OPENAI_API_KEY to Railway env vars.' });
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: 'AI parsing not configured — add ANTHROPIC_API_KEY to Railway env vars.' });
   if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
 
   try {
@@ -798,14 +798,11 @@ app.post('/api/recipes/parse-document', requireAuth, requireAdmin, upload.single
 
     if (!text.trim()) return res.status(400).json({ error: 'Could not extract text from document.' });
 
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content: `You are a recipe parser for a childcare company's food program. Extract recipe data from the provided text and return ONLY valid JSON with this exact structure:
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 1024,
+      system: `You are a recipe parser for a childcare company's food program. Extract recipe data from the provided text and return ONLY valid JSON with this exact structure:
 {
   "name": "Recipe name",
   "category": "one of: Breakfast, Lunch, Dinner, Snack, Dessert — pick the best fit or null",
@@ -818,13 +815,11 @@ Rules:
 - If multiple recipes are present, return only the first/main one.
 - For ingredients: split quantity and unit from the ingredient name. quantity and unit may be null if not listed.
 - Steps should be clean, readable sentences.
-- Do not include markdown, only JSON.`
-        },
-        { role: 'user', content: text.slice(0, 8000) }
-      ]
+- Return ONLY the JSON object, no markdown, no explanation.`,
+      messages: [{ role: 'user', content: text.slice(0, 8000) }]
     });
 
-    const parsed = JSON.parse(completion.choices[0].message.content);
+    const parsed = JSON.parse(message.content[0].text);
     res.json(parsed);
   } catch (err) {
     console.error('Recipe parse error:', err);
