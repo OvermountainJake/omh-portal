@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useAuth } from '../context/AuthContext'
 import {
   Plus, ChevronDown, ChevronUp, TrendingDown, UtensilsCrossed,
-  DollarSign, X, Edit2, Upload, Search, BarChart3, Package,
+  DollarSign, X, Edit2, Pencil, Upload, Search, BarChart3, Package,
   ShoppingCart, Leaf, AlertCircle, CheckCircle2, FileText, Trash2
 } from 'lucide-react'
 
@@ -198,7 +198,9 @@ const VENDOR_TYPES = ['grocery', 'wholesale', 'distributor', 'local']
 
 function VendorListModal({ vendors, setVendors, user, API, onClose }) {
   const [adding, setAdding] = useState(false)
-  const [form, setForm] = useState({ name: '', type: 'grocery', notes: '' })
+  const [editingId, setEditingId] = useState(null)
+  const [form, setForm] = useState({ name: '', type: 'grocery', notes: '', website: '' })
+  const [editForm, setEditForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -214,8 +216,29 @@ function VendorListModal({ vendors, setVendors, user, API, onClose }) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to add vendor')
       setVendors(v => [...v, data])
-      setForm({ name: '', type: 'grocery', notes: '' })
+      setForm({ name: '', type: 'grocery', notes: '', website: '' })
       setAdding(false)
+    } catch (err) { setError(err.message) }
+    finally { setSaving(false) }
+  }
+
+  const handleEdit = (v) => {
+    setEditingId(v.id)
+    setEditForm({ name: v.name, type: v.type, notes: v.notes || '', website: v.website || '' })
+  }
+
+  const handleEditSave = async (id) => {
+    setSaving(true)
+    try {
+      const res = await fetch(`${API}/vendors/${id}`, {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to update vendor')
+      setVendors(v => v.map(x => x.id === id ? data : x))
+      setEditingId(null)
     } catch (err) { setError(err.message) }
     finally { setSaving(false) }
   }
@@ -228,10 +251,11 @@ function VendorListModal({ vendors, setVendors, user, API, onClose }) {
 
   const typeColor = { grocery: '#10B981', wholesale: '#3B82F6', distributor: '#8B5CF6', local: '#F59E0B' }
   const typeBg   = { grocery: '#ECFDF5', wholesale: '#EFF6FF', distributor: '#F5F3FF', local: '#FFFBEB' }
+  const inputStyle = { padding: '0.4rem 0.625rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '0.8125rem', width: '100%', boxSizing: 'border-box' }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 540 }}>
         <div className="modal-header">
           <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <ShoppingCart size={18} style={{ color: 'var(--sage)' }} /> Vendors on File
@@ -246,25 +270,52 @@ function VendorListModal({ vendors, setVendors, user, API, onClose }) {
             <div>
               {vendors.map((v, i) => (
                 <div key={v.id} style={{
-                  display: 'flex', alignItems: 'center', gap: '0.875rem',
                   padding: '0.75rem 1.25rem',
                   borderBottom: i < vendors.length - 1 ? '1px solid var(--border)' : 'none',
                 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.9375rem', color: 'var(--text)' }}>{v.name}</div>
-                    {v.notes && <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.125rem' }}>{v.notes}</div>}
-                  </div>
-                  <span style={{
-                    fontSize: '0.7rem', fontWeight: 700, padding: '0.2rem 0.625rem',
-                    borderRadius: 999, textTransform: 'capitalize',
-                    background: typeBg[v.type] || '#F9FAFB',
-                    color: typeColor[v.type] || '#6B7280',
-                    border: `1px solid ${typeColor[v.type] || '#D1D5DB'}`,
-                  }}>{v.type}</span>
-                  {user?.role === 'admin' && (
-                    <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(v.id)} style={{ color: 'var(--text-muted)' }}>
-                      <Trash2 size={14} />
-                    </button>
+                  {editingId === v.id ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.5rem' }}>
+                        <input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} placeholder="Vendor name" style={inputStyle} autoFocus />
+                        <select value={editForm.type} onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))} style={{ ...inputStyle, width: 'auto' }}>
+                          {VENDOR_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </div>
+                      <input value={editForm.website} onChange={e => setEditForm(f => ({ ...f, website: e.target.value }))} placeholder="Website domain (e.g. walmart.com)" style={inputStyle} />
+                      <input value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} placeholder="Notes (optional)" style={inputStyle} />
+                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => setEditingId(null)}>Cancel</button>
+                        <button className="btn btn-primary btn-sm" onClick={() => handleEditSave(v.id)} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.9375rem', color: 'var(--text)' }}>{v.name}</div>
+                        {v.website
+                          ? <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.125rem' }}>🔗 {v.website}</div>
+                          : user?.role === 'admin' && <div style={{ fontSize: '0.75rem', color: '#F59E0B', marginTop: '0.125rem' }}>⚠ No website — prices won't auto-refresh</div>
+                        }
+                        {v.notes && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.125rem' }}>{v.notes}</div>}
+                      </div>
+                      <span style={{
+                        fontSize: '0.7rem', fontWeight: 700, padding: '0.2rem 0.625rem',
+                        borderRadius: 999, textTransform: 'capitalize', flexShrink: 0,
+                        background: typeBg[v.type] || '#F9FAFB',
+                        color: typeColor[v.type] || '#6B7280',
+                        border: `1px solid ${typeColor[v.type] || '#D1D5DB'}`,
+                      }}>{v.type}</span>
+                      {user?.role === 'admin' && (
+                        <>
+                          <button className="btn btn-ghost btn-sm" onClick={() => handleEdit(v)} style={{ color: 'var(--text-muted)' }} title="Edit vendor">
+                            <Pencil size={14} />
+                          </button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(v.id)} style={{ color: 'var(--text-muted)' }} title="Remove vendor">
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   )}
                 </div>
               ))}
@@ -282,6 +333,8 @@ function VendorListModal({ vendors, setVendors, user, API, onClose }) {
                   {VENDOR_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
+              <input value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} placeholder="Website domain for price search (e.g. walmart.com)"
+                style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '0.875rem', marginBottom: '0.5rem', boxSizing: 'border-box' }} />
               <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Notes (optional)"
                 style={{ width: '100%', padding: '0.5rem 0.75rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: '0.875rem', marginBottom: '0.5rem', boxSizing: 'border-box' }} />
               <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>

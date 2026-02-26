@@ -414,10 +414,19 @@ app.get('/api/vendors', requireAuth, async (req, res) => {
 
 app.post('/api/vendors', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { name, type, notes } = req.body;
+    const { name, type, notes, website } = req.body;
     if (!name) return res.status(400).json({ error: 'Vendor name required' });
-    const r = await db.prepare('INSERT INTO vendors (name,type,notes) VALUES (?,?,?)').run(name, type||'grocery', notes||null);
+    const r = await db.prepare('INSERT INTO vendors (name,type,notes,website) VALUES (?,?,?,?)').run(name, type||'grocery', notes||null, website||null);
     res.json(await db.prepare('SELECT * FROM vendors WHERE id = ?').get(r.lastInsertRowid));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/vendors/:id', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { name, type, notes, website } = req.body;
+    if (!name) return res.status(400).json({ error: 'Vendor name required' });
+    await db.prepare('UPDATE vendors SET name=?,type=?,notes=?,website=? WHERE id=?').run(name, type||'grocery', notes||null, website||null, req.params.id);
+    res.json(await db.prepare('SELECT * FROM vendors WHERE id = ?').get(req.params.id));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -833,9 +842,11 @@ async function runPriceRefresh() {
   for (const ingredient of ingredients) {
     for (const vendor of vendors) {
       try {
-        // Targeted search: vendor name + ingredient — finds actual listed prices instead of guessing
-        const q = encodeURIComponent(`"${vendor.name}" ${ingredient.name} price per ${ingredient.unit||'unit'}`);
-        const searchRes = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${q}&count=5`, {
+        // Use site: search when vendor has a website (finds real product pages), else fall back to name search
+        const searchQuery = vendor.website
+          ? `site:${vendor.website} ${ingredient.name}`
+          : `"${vendor.name}" ${ingredient.name} price`;
+        const searchRes = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(searchQuery)}&count=5`, {
           headers: { 'Accept': 'application/json', 'X-Subscription-Token': process.env.BRAVE_SEARCH_API_KEY }
         });
         const searchData = await searchRes.json();

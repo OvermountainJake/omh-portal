@@ -135,10 +135,11 @@ async function initSchema() {
     );
 
     CREATE TABLE IF NOT EXISTS vendors (
-      id    SERIAL PRIMARY KEY,
-      name  TEXT NOT NULL UNIQUE,
-      type  TEXT DEFAULT 'grocery' CHECK(type IN ('grocery','wholesale','distributor','local')),
-      notes TEXT
+      id      SERIAL PRIMARY KEY,
+      name    TEXT NOT NULL UNIQUE,
+      type    TEXT DEFAULT 'grocery' CHECK(type IN ('grocery','wholesale','distributor','local')),
+      notes   TEXT,
+      website TEXT
     );
 
     CREATE TABLE IF NOT EXISTS ingredient_prices (
@@ -352,6 +353,26 @@ async function initSchema() {
   `);
 }
 
+// ─── Migrations ────────────────────────────────────────────────────────────────
+
+async function runMigrations() {
+  // Add website column to vendors if not already present
+  await pool.query(`ALTER TABLE vendors ADD COLUMN IF NOT EXISTS website TEXT`);
+
+  // Populate known vendor websites (safe to run repeatedly — only sets where null)
+  const knownWebsites = [
+    ['Walmart',               'walmart.com'],
+    ['Aldi',                  'aldi.us'],
+    ['Costco',                'costco.com'],
+    ["Sam's Club",            'samsclub.com'],
+    ['Gordon Food Service',   'gfs.com'],
+    ['Festival Foods',        'festivalbfoods.com'],
+  ];
+  for (const [name, website] of knownWebsites) {
+    await pool.query(`UPDATE vendors SET website = $1 WHERE name = $2 AND (website IS NULL OR website = '')`, [website, name]);
+  }
+}
+
 // ─── Seed data ─────────────────────────────────────────────────────────────────
 
 async function seedIfEmpty() {
@@ -397,6 +418,7 @@ async function ensureReady() {
   }
   try {
     await initSchema();
+    await runMigrations();
     await seedIfEmpty();
     initialized = true;
     console.log('✓ Database ready (PostgreSQL)');
