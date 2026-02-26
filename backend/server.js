@@ -906,12 +906,14 @@ app.post('/api/recipes/parse-document', requireAuth, requireAdmin, upload.single
     if (!text.trim()) return res.status(400).json({ error: 'Could not extract text from document.' });
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5', max_tokens: 1024,
-      system: `You are a recipe parser for a childcare company's food program. Extract recipe data and return ONLY valid JSON:\n{"name":"...","category":"Breakfast|Lunch|Dinner|Snack|Dessert or null","servings":N,"ingredients":[{"quantity":"1","unit":"cup","name":"flour"}],"steps":["Step 1"],"notes":"... or null"}\nIf multiple recipes, return only the first. No markdown.`,
-      messages: [{ role: 'user', content: text.slice(0, 8000) }]
+      model: 'claude-haiku-4-5', max_tokens: 8192,
+      system: `You are a recipe parser for a childcare company's food program. Extract ALL recipes found in the document and return ONLY a valid JSON array:\n[{"name":"...","category":"Breakfast|Lunch|Dinner|Snack|Dessert or null","servings":N,"ingredients":[{"quantity":"1","unit":"cup","name":"flour"}],"steps":["Step 1"],"notes":"... or null"}]\nInclude every recipe you find. If there is only one recipe, still return an array with one item. No markdown, no explanation.`,
+      messages: [{ role: 'user', content: text.slice(0, 60000) }]
     });
     const raw = message.content[0].text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim();
-    res.json(JSON.parse(raw));
+    const parsed = JSON.parse(raw);
+    const recipes = Array.isArray(parsed) ? parsed : [parsed];
+    res.json({ recipes });
   } catch (err) { console.error('Recipe parse error:', err); res.status(500).json({ error: 'Failed to parse document: ' + err.message }); }
 });
 

@@ -1436,6 +1436,7 @@ function RecipesTab({ center, API, user }) {
   const [showAll, setShowAll] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
+  const [bulkImport, setBulkImport] = useState(null) // { recipes, selected }
   const fileInputRef = useRef(null)
 
   const handleImportFile = async (e) => {
@@ -1450,9 +1451,36 @@ function RecipesTab({ center, API, user }) {
       const res = await fetch(`${API}/recipes/parse-document`, { method: 'POST', body: fd, credentials: 'include' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Parse failed')
-      // pre-fill the recipe form with parsed data
-      setEditing({ ...data, center_id: center?.id || null, _parsed: true })
-      setShowAdd(true)
+      const recipes = data.recipes || [data]
+      if (recipes.length === 1) {
+        // Single recipe — go straight to the edit form
+        setEditing({ ...recipes[0], center_id: center?.id || null, _parsed: true })
+        setShowAdd(true)
+      } else {
+        // Multiple recipes — show bulk review screen
+        setBulkImport({ recipes, selected: new Set(recipes.map((_, i) => i)) })
+      }
+    } catch (err) {
+      setImportError(err.message)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleBulkSave = async () => {
+    if (!bulkImport) return
+    const toSave = bulkImport.recipes.filter((_, i) => bulkImport.selected.has(i))
+    setImporting(true)
+    try {
+      for (const recipe of toSave) {
+        await fetch(`${API}/recipes`, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...recipe, center_id: center?.id || null }),
+        })
+      }
+      setBulkImport(null)
+      load()
     } catch (err) {
       setImportError(err.message)
     } finally {
@@ -1510,6 +1538,42 @@ function RecipesTab({ center, API, user }) {
         <div style={{ background: '#FFF1F2', borderLeft: '4px solid #F43F5E', color: '#BE123C', padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)', marginBottom: '1rem', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <AlertCircle size={15} /> {importError}
           <button onClick={() => setImportError('')} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#BE123C' }}><X size={14} /></button>
+        </div>
+      )}
+
+      {bulkImport && (
+        <div className="card" style={{ marginBottom: '1.25rem', padding: '1.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+            <CheckCircle2 size={20} style={{ color: 'var(--sage)' }} />
+            <div>
+              <div style={{ fontWeight: 600 }}>Found {bulkImport.recipes.length} recipes</div>
+              <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>Select which ones to import</div>
+            </div>
+            <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setBulkImport(null)}><X size={14} /></button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+            {bulkImport.recipes.map((r, i) => (
+              <label key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.625rem 0.875rem', border: '1.5px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: bulkImport.selected.has(i) ? 'var(--plum-bg)' : 'var(--white)', borderColor: bulkImport.selected.has(i) ? 'var(--plum)' : 'var(--border)' }}>
+                <input type="checkbox" checked={bulkImport.selected.has(i)} onChange={e => {
+                  const next = new Set(bulkImport.selected)
+                  e.target.checked ? next.add(i) : next.delete(i)
+                  setBulkImport(b => ({ ...b, selected: next }))
+                }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500, fontSize: '0.9rem' }}>{r.name}</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    {[r.category, r.servings ? `${r.servings} servings` : null, r.ingredients?.length ? `${r.ingredients.length} ingredients` : null].filter(Boolean).join(' · ')}
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => setBulkImport(null)}>Cancel</button>
+            <button className="btn btn-primary btn-sm" onClick={handleBulkSave} disabled={importing || bulkImport.selected.size === 0}>
+              {importing ? 'Saving…' : `Import ${bulkImport.selected.size} Recipe${bulkImport.selected.size !== 1 ? 's' : ''}`}
+            </button>
+          </div>
         </div>
       )}
 
