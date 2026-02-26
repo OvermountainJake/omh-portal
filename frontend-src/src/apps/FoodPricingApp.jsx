@@ -78,11 +78,10 @@ export default function FoodPricingApp() {
   const compareCount = ingredients.filter(i => i.prices?.length > 1).length
 
   const tabs = [
-    { key: 'purchasing', label: 'Purchasing',          icon: ShoppingCart,   count: null },
-    { key: 'menus',      label: 'Menus',               icon: UtensilsCrossed,count: menus.length },
-    { key: 'recipes',    label: 'Recipes',             icon: FileText,       count: null },
-    { key: 'prices',     label: 'Prices',              icon: DollarSign,     count: null },
-    { key: 'insights',   label: 'Ingredient Insights', icon: BarChart3,      count: ingredients.length },
+    { key: 'purchasing', label: 'Purchasing',  icon: ShoppingCart,   count: null },
+    { key: 'menus',      label: 'Menus',       icon: UtensilsCrossed,count: menus.length },
+    { key: 'recipes',    label: 'Recipes',     icon: FileText,       count: null },
+    { key: 'prices',     label: 'Prices',      icon: DollarSign,     count: null },
   ]
 
   return (
@@ -178,9 +177,7 @@ export default function FoodPricingApp() {
         <RecipesTab center={center} API={API} user={user} />
       ) : tab === 'prices' ? (
         <PricesTab ingredients={ingredients} setIngredients={setIngredients} vendors={vendors} API={API} user={user} />
-      ) : (
-        <InsightsTab ingredients={ingredients} vendors={vendors} API={API} />
-      )}
+      ) : null}
 
       {showVendorList && (
         <VendorListModal
@@ -729,6 +726,7 @@ function MenusTab({ menus, setMenus, center, API, user }) {
 // ── Prices Tab ─────────────────────────────────────────────────────────────────
 
 function PricesTab({ ingredients, setIngredients, vendors, API, user }) {
+  const [view, setView] = useState('prices') // 'prices' | 'insights'
   const [showAdd, setShowAdd] = useState(false)
   const [editing, setEditing] = useState(null)
   const [search, setSearch] = useState('')
@@ -796,6 +794,18 @@ function PricesTab({ ingredients, setIngredients, vendors, API, user }) {
 
   return (
     <div>
+      {/* View Toggle */}
+      <div style={{ display: 'flex', gap: '0.375rem', marginBottom: '1.25rem', background: 'var(--white)', borderRadius: 'var(--radius-sm)', padding: '0.25rem', width: 'fit-content', border: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
+        {[{key:'prices',label:'Manage Prices'},{key:'insights',label:'Insights'}].map(v => (
+          <button key={v.key} onClick={() => setView(v.key)} style={{ padding: '0.4rem 0.875rem', borderRadius: 'calc(var(--radius-sm) - 2px)', border: 'none', background: view === v.key ? 'var(--plum)' : 'transparent', color: view === v.key ? 'white' : 'var(--text-muted)', fontWeight: view === v.key ? 600 : 400, fontSize: '0.8125rem', cursor: 'pointer', transition: 'all 0.15s' }}>
+            {v.label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'insights' ? <InsightsTab ingredients={ingredients} vendors={vendors} API={API} /> : null}
+      {view !== 'insights' && <>
+
       {/* Filters Row */}
       <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 180 }}>
@@ -976,6 +986,7 @@ function PricesTab({ ingredients, setIngredients, vendors, API, user }) {
           }}
         />
       )}
+      </>}
     </div>
   )
 }
