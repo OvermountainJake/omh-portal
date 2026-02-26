@@ -81,6 +81,7 @@ export default function FoodPricingApp() {
     { key: 'purchasing', label: 'Purchasing',          icon: ShoppingCart,   count: null },
     { key: 'menus',      label: 'Menus',               icon: UtensilsCrossed,count: menus.length },
     { key: 'recipes',    label: 'Recipes',             icon: FileText,       count: null },
+    { key: 'prices',     label: 'Prices',              icon: DollarSign,     count: null },
     { key: 'insights',   label: 'Ingredient Insights', icon: BarChart3,      count: ingredients.length },
   ]
 
@@ -175,6 +176,8 @@ export default function FoodPricingApp() {
         <MenusTab menus={menus} setMenus={setMenus} center={center} API={API} user={user} />
       ) : tab === 'recipes' ? (
         <RecipesTab center={center} API={API} user={user} />
+      ) : tab === 'prices' ? (
+        <PricesTab ingredients={ingredients} setIngredients={setIngredients} vendors={vendors} API={API} user={user} />
       ) : (
         <InsightsTab ingredients={ingredients} vendors={vendors} API={API} />
       )}
