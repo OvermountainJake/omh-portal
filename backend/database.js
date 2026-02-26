@@ -29,7 +29,7 @@ class Statement {
     const flat = flatten(params);
     const pgSql = toPositional(this.sql);
     const isInsert = /^\s*INSERT/i.test(this.sql);
-    const finalSql = isInsert && !/RETURNING/i.test(pgSql) ? pgSql + ' RETURNING id' : pgSql;
+    const finalSql = isInsert && !/RETURNING/i.test(pgSql) ? pgSql + ' RETURNING *' : pgSql;
     try {
       const { rows, rowCount } = await pool.query(finalSql, flat.length ? flat : undefined);
       return { lastInsertRowid: rows[0]?.id ?? null, changes: rowCount };
