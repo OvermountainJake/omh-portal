@@ -827,38 +827,51 @@ async function runPriceRefresh() {
   const ingredients = await db.prepare('SELECT * FROM ingredients ORDER BY name').all();
   const vendors = await db.prepare('SELECT * FROM vendors ORDER BY name').all();
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  const vendorNames = vendors.map(v => v.name).join(', ');
-  let updated = 0, failed = 0;
+  let updated = 0, failed = 0, skipped = 0;
+
   for (const ingredient of ingredients) {
-    try {
-      const q = encodeURIComponent(`${ingredient.name} grocery price ${PRICE_REFRESH_LOCATION}`);
-      const searchRes = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${q}&count=5`, {
-        headers: { 'Accept': 'application/json', 'X-Subscription-Token': process.env.BRAVE_SEARCH_API_KEY }
-      });
-      const searchData = await searchRes.json();
-      const snippets = (searchData.web?.results||[]).slice(0,5).map(r => `${r.title}: ${r.description}`).join('\n');
-      if (!snippets) { failed++; continue; }
-      const msg = await anthropic.messages.create({
-        model: 'claude-haiku-4-5', max_tokens: 256,
-        system: `You are a grocery price estimator. Given search results, estimate the current retail price for "${ingredient.name}" in ${PRICE_REFRESH_LOCATION} at each of these stores: ${vendorNames}.\nReturn ONLY valid JSON like: {"Aldi": 1.29, "Walmart": 1.49}\nUse null for stores you cannot estimate. Prices should be per ${ingredient.unit||'unit'}. No markdown.`,
-        messages: [{ role: 'user', content: snippets }]
-      });
-      const raw = msg.content[0].text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim();
-      const prices = JSON.parse(raw);
-      for (const vendor of vendors) {
-        const price = prices[vendor.name];
-        if (price !== null && price !== undefined && !isNaN(Number(price))) {
+    for (const vendor of vendors) {
+      try {
+        // Targeted search: vendor name + ingredient — finds actual listed prices instead of guessing
+        const q = encodeURIComponent(`"${vendor.name}" ${ingredient.name} price per ${ingredient.unit||'unit'}`);
+        const searchRes = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${q}&count=5`, {
+          headers: { 'Accept': 'application/json', 'X-Subscription-Token': process.env.BRAVE_SEARCH_API_KEY }
+        });
+        const searchData = await searchRes.json();
+        const snippets = (searchData.web?.results||[]).slice(0,5).map(r => `${r.title}: ${r.description}`).join('\n');
+
+        if (!snippets) { skipped++; continue; }
+
+        const msg = await anthropic.messages.create({
+          model: 'claude-haiku-4-5', max_tokens: 64,
+          system: `Extract the price of "${ingredient.name}" sold by "${vendor.name}" from these search results.\nReturn ONLY valid JSON: {"price": 1.29, "unit": "lb"} — or {"price": null} if no confident price is found.\nDo NOT estimate or guess. Only return a price if it appears in the search results. No markdown.`,
+          messages: [{ role: 'user', content: snippets }]
+        });
+
+        const raw = msg.content[0].text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim();
+        const result = JSON.parse(raw);
+
+        if (result.price !== null && result.price !== undefined && !isNaN(Number(result.price))) {
+          // Only overwrite if we found a real price — leaves manual entries intact when price is not found
           await db.prepare('DELETE FROM ingredient_prices WHERE ingredient_id=? AND vendor_id=? AND center_id IS NULL').run(ingredient.id, vendor.id);
-          await db.prepare('INSERT INTO ingredient_prices (ingredient_id,vendor_id,center_id,price,unit,recorded_at) VALUES (?,?,NULL,?,?,CURRENT_DATE)').run(ingredient.id, vendor.id, Number(price), ingredient.unit||'each');
+          await db.prepare('INSERT INTO ingredient_prices (ingredient_id,vendor_id,center_id,price,unit,recorded_at) VALUES (?,?,NULL,?,?,CURRENT_DATE)').run(
+            ingredient.id, vendor.id, Number(result.price), result.unit || ingredient.unit || 'each'
+          );
           updated++;
+        } else {
+          skipped++; // No price found — manual entry (if any) is preserved
         }
+      } catch (err) {
+        console.error(`Price refresh failed for ${ingredient.name} @ ${vendor.name}:`, err.message);
+        failed++;
       }
-    } catch (err) { console.error(`Price refresh failed for ${ingredient.name}:`, err.message); failed++; }
-    await new Promise(r => setTimeout(r, 300));
+      await new Promise(r => setTimeout(r, 400)); // Respect Brave rate limits
+    }
   }
+
   await setSetting('last_price_refresh', new Date().toISOString());
   await setSetting('price_refresh_status', 'done');
-  await setSetting('price_refresh_summary', JSON.stringify({ updated, failed, total: ingredients.length }));
+  await setSetting('price_refresh_summary', JSON.stringify({ updated, failed, skipped, total: ingredients.length * vendors.length }));
 }
 
 // ─── Recipes ──────────────────────────────────────────────────────────────────
