@@ -766,7 +766,7 @@ function PricesTab({ ingredients, setIngredients, vendors, API, user }) {
   const handleRefresh = async () => {
     setRefreshError('')
     try {
-      const res = await fetch(`${API}/ingredients/refresh-prices`, { method: 'POST', credentials: 'include' })
+      const res = await fetch(`${API}/ingredients/refresh-prices?force=true`, { method: 'POST', credentials: 'include' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setRefreshStatus(s => ({ ...s, status: 'running' }))
@@ -824,12 +824,12 @@ function PricesTab({ ingredients, setIngredients, vendors, API, user }) {
             <button
               className="btn btn-secondary btn-sm"
               onClick={handleRefresh}
-              disabled={!refreshStatus.canRefresh || refreshStatus.status === 'running'}
-              title={!refreshStatus.canRefresh ? `Next refresh in ${refreshStatus.hoursUntilNext}h` : 'Fetch current prices from web for all ingredients & vendors'}
+              disabled={refreshStatus.status === 'running'}
+              title={refreshStatus.lastRefresh ? `Last refreshed ${formatLastRefresh(refreshStatus.lastRefresh)} — click to refresh again` : 'Fetch current prices from web for all ingredients & vendors'}
               style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}
             >
-              <TrendingDown size={14} style={{ transform: refreshStatus.status === 'running' ? 'none' : undefined }} />
-              {refreshStatus.status === 'running' ? 'Refreshing…' : !refreshStatus.canRefresh ? `Refresh in ${refreshStatus.hoursUntilNext}h` : 'Refresh Prices'}
+              <TrendingDown size={14} />
+              {refreshStatus.status === 'running' ? 'Refreshing…' : 'Refresh Prices'}
             </button>
             <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>
               <Plus size={14} /> Add Ingredient

@@ -809,10 +809,11 @@ app.post('/api/ingredients/refresh-prices', requireAuth, requireAdmin, async (re
   if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set in Railway env vars.' });
   if (!process.env.BRAVE_SEARCH_API_KEY) return res.status(503).json({ error: 'BRAVE_SEARCH_API_KEY not set in Railway env vars.' });
   try {
+    const force = req.query.force === 'true';
     const last = await getSetting('last_price_refresh');
     const status = await getSetting('price_refresh_status');
     if (status === 'running') return res.status(429).json({ error: 'A price refresh is already in progress.' });
-    if (last) {
+    if (!force && last) {
       const hoursAgo = (Date.now() - new Date(last).getTime()) / 3600000;
       if (hoursAgo < PRICE_REFRESH_COOLDOWN_HOURS)
         return res.status(429).json({ error: `Prices were refreshed ${Math.round(hoursAgo)}h ago. Next refresh in ${Math.ceil(PRICE_REFRESH_COOLDOWN_HOURS - hoursAgo)}h.`, lastRefresh: last });
