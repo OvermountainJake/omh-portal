@@ -9,6 +9,7 @@ const { signToken, requireAuth, requireAdmin, requireCenterAccess, COOKIE_NAME, 
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
+const XLSX = require('xlsx');
 const Anthropic = require('@anthropic-ai/sdk');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -512,6 +513,104 @@ app.post('/api/centers/:centerId/menus', requireAuth, requireAdmin, async (req, 
     }
     res.json({ id: r.lastInsertRowid, week_label, week_start, week_end });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Menu Email Intake ─────────────────────────────────────────────────────────
+
+app.post('/api/menus/email-intake', upload.single('file'), async (req, res) => {
+  // Auth: internal secret (no cookie/session needed — called by the local script)
+  const secret = req.headers['x-internal-secret'] || req.body?.secret;
+  if (!secret || secret !== process.env.INTERNAL_SECRET) return res.status(401).json({ error: 'Unauthorized' });
+  if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set.' });
+  if (!req.file) return res.status(400).json({ error: 'No file attached.' });
+
+  try {
+    // ── Extract text from file ──
+    let text = '';
+    const mime = req.file.mimetype;
+    const name = req.file.originalname.toLowerCase();
+
+    if (mime === 'application/pdf' || name.endsWith('.pdf')) {
+      text = (await pdfParse(req.file.buffer)).text;
+    } else if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || name.endsWith('.docx')) {
+      text = (await mammoth.extractRawText({ buffer: req.file.buffer })).value;
+    } else if (name.endsWith('.doc')) {
+      return res.status(400).json({ error: 'Legacy .doc not supported. Save as .docx.' });
+    } else if (name.match(/\.(xlsx|xls|csv)$/)) {
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const lines = [];
+      wb.SheetNames.forEach(sheetName => {
+        lines.push(`=== ${sheetName} ===`);
+        lines.push(XLSX.utils.sheet_to_csv(wb.Sheets[sheetName]));
+      });
+      text = lines.join('\n');
+    } else {
+      return res.status(400).json({ error: 'Unsupported file type. Send .pdf, .docx, .xlsx, or .csv.' });
+    }
+
+    if (!text.trim()) return res.status(400).json({ error: 'Could not extract text from file.' });
+
+    // ── AI: extract all weekly menus ──
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5', max_tokens: 8192,
+      system: `You are a menu parser for a childcare food program. Extract ALL weekly menus from the document.
+Return ONLY a valid JSON array. Each element represents one week:
+[{
+  "week_label": "Week of March 3, 2025",
+  "week_start": "2025-03-03",
+  "week_end": "2025-03-07",
+  "days": [
+    {"day": "Monday", "breakfast": ["item1","item2"], "lunch": ["item1","item2"], "snack": ["item1"]},
+    {"day": "Tuesday", "breakfast": [...], "lunch": [...], "snack": [...]},
+    {"day": "Wednesday", "breakfast": [...], "lunch": [...], "snack": [...]},
+    {"day": "Thursday", "breakfast": [...], "lunch": [...], "snack": [...]},
+    {"day": "Friday", "breakfast": [...], "lunch": [...], "snack": [...]}
+  ]
+}]
+Rules:
+- week_start must be a Monday in YYYY-MM-DD format. Infer from dates in the document if available, otherwise estimate.
+- Include every week you find. If no dates are given, use consecutive Mondays starting from the nearest upcoming Monday.
+- Use empty arrays [] for any missing meals.
+- No markdown, no explanation.`,
+      messages: [{ role: 'user', content: text.slice(0, 60000) }]
+    });
+
+    const raw = msg.content[0].text.replace(/^```(?:json)?\s*/i,'').replace(/\s*```\s*$/,'').trim();
+    const weeks = JSON.parse(raw);
+    if (!Array.isArray(weeks) || weeks.length === 0) return res.status(422).json({ error: 'No menu data found in document.' });
+
+    // ── Get center — for now, use the first center (test mode) ──
+    // TODO: route by sender email when multi-center rollout happens
+    const center = await db.prepare('SELECT id, name FROM centers ORDER BY id LIMIT 1').get();
+    if (!center) return res.status(404).json({ error: 'No centers found in database.' });
+
+    // ── Save each week ──
+    const created = [];
+    for (const week of weeks) {
+      const menuRow = await db.prepare(
+        'INSERT INTO weekly_menus (center_id,week_label,week_start,week_end) VALUES (?,?,?,?)'
+      ).run(center.id, week.week_label || `Week of ${week.week_start}`, week.week_start, week.week_end || week.week_start);
+      const menuId = menuRow.lastInsertRowid;
+
+      for (const day of (week.days || [])) {
+        for (const mealType of ['breakfast', 'lunch', 'snack']) {
+          const items = day[mealType] || [];
+          if (items.length > 0) {
+            await db.prepare(
+              'INSERT INTO menu_items (menu_id,day_of_week,meal_type,items) VALUES (?,?,?,?)'
+            ).run(menuId, day.day, mealType, JSON.stringify(items));
+          }
+        }
+      }
+      created.push({ id: menuId, week_label: week.week_label, week_start: week.week_start, center: center.name });
+    }
+
+    res.json({ ok: true, created });
+  } catch (err) {
+    console.error('Menu email intake error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Dashboard ─────────────────────────────────────────────────────────────────
