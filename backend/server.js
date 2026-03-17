@@ -1184,23 +1184,16 @@ app.delete('/api/handbooks/:id', requireAuth, requireAdmin, async (req, res) => 
 // Body: { html: "<html>...</html>", options: { landscape: true } }
 // Headers: x-internal-secret: <INTERNAL_SECRET>
 // Returns: application/pdf binary
-app.post('/api/internal/html-to-pdf', express.text({ type: '*/*', limit: '10mb' }), async (req, res) => {
+app.post('/api/internal/html-to-pdf', async (req, res) => {
   try {
-    const secret = req.headers['x-internal-secret'];
+    // Accept secret in header or body (consistent with other internal endpoints)
+    const secret = req.headers['x-internal-secret'] || req.body?.secret;
     if (!secret || secret !== process.env.INTERNAL_SECRET) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    let html, landscape = true;
-    const ct = req.headers['content-type'] || '';
-    if (ct.includes('application/json')) {
-      const body = JSON.parse(req.body);
-      html = body.html;
-      landscape = body.landscape !== false;
-    } else {
-      // Raw HTML in body
-      html = req.body;
-    }
+    const html = req.body?.html;
+    const landscape = req.body?.landscape !== false;
 
     if (!html) return res.status(400).json({ error: 'html body required' });
 
