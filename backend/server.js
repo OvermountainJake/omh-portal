@@ -1179,6 +1179,62 @@ app.delete('/api/handbooks/:id', requireAuth, requireAdmin, async (req, res) => 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── PDF Generation ──────────────────────────────────────────────────────────
+// POST /api/internal/html-to-pdf
+// Body: { html: "<html>...</html>", options: { landscape: true } }
+// Headers: x-internal-secret: <INTERNAL_SECRET>
+// Returns: application/pdf binary
+app.post('/api/internal/html-to-pdf', express.text({ type: '*/*', limit: '10mb' }), async (req, res) => {
+  try {
+    const secret = req.headers['x-internal-secret'];
+    if (!secret || secret !== process.env.INTERNAL_SECRET) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    let html, landscape = true;
+    const ct = req.headers['content-type'] || '';
+    if (ct.includes('application/json')) {
+      const body = JSON.parse(req.body);
+      html = body.html;
+      landscape = body.landscape !== false;
+    } else {
+      // Raw HTML in body
+      html = req.body;
+    }
+
+    if (!html) return res.status(400).json({ error: 'html body required' });
+
+    const chromium = require('@sparticuz/chromium');
+    const puppeteer = require('puppeteer-core');
+
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+    });
+
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      landscape,
+      printBackground: true,
+      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' }
+    });
+
+    await browser.close();
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="report.pdf"');
+    res.send(pdfBuffer);
+  } catch (e) {
+    console.error('PDF generation error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Catch-all ────────────────────────────────────────────────────────────────
 
 if (fs.existsSync(FRONTEND_BUILD)) {
