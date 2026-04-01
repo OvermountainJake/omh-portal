@@ -1228,6 +1228,23 @@ app.post('/api/internal/html-to-pdf', async (req, res) => {
   }
 });
 
+// ─── QBO OAuth Callback ───────────────────────────────────────────────────────
+// Captures the auth code from Intuit and displays it so Jake can exchange it.
+app.get('/qbo-callback', (req, res) => {
+  const { code, realmId, state, error } = req.query;
+  if (error) return res.send(`<h2>QBO Auth Error</h2><pre>${error}</pre>`);
+  if (!code) return res.send('<h2>QBO Callback</h2><p>No code received.</p>');
+  res.send(`
+    <html><body style="font-family:monospace;padding:20px;background:#1a1a1a;color:#00ff88">
+    <h2>✅ QBO Auth Code Received</h2>
+    <p>Copy the URL from your browser address bar and paste it to Jake in Slack.</p>
+    <b>code:</b> ${code}<br>
+    <b>realmId:</b> ${realmId}<br>
+    <b>state:</b> ${state}<br>
+    </body></html>
+  `);
+});
+
 // ─── Catch-all ────────────────────────────────────────────────────────────────
 
 if (fs.existsSync(FRONTEND_BUILD)) {
