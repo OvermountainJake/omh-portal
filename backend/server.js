@@ -902,14 +902,25 @@ async function setSetting(key, val) {
   await db.prepare('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value').run(key, val);
 }
 
+app.get('/api/ingredients/refresh-preview', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const ingCount = (await db.prepare('SELECT COUNT(*) as n FROM ingredients').get()).n;
+    const venCount = (await db.prepare('SELECT COUNT(*) as n FROM vendors').get()).n;
+    const totalCalls = ingCount * venCount;
+    const estSeconds = totalCalls * 2; // ~2s per pair (search + AI + delay)
+    res.json({ ingredients: ingCount, vendors: venCount, totalCalls, estSeconds });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/ingredients/refresh-status', requireAuth, async (req, res) => {
   try {
     const status = await getSetting('price_refresh_status') || 'idle';
     const last   = await getSetting('last_price_refresh');
     const summary = await getSetting('price_refresh_summary');
+    const progress = await getSetting('price_refresh_progress');
     const hoursAgo = last ? (Date.now() - new Date(last).getTime()) / 3600000 : null;
     const canRefresh = !last || hoursAgo >= PRICE_REFRESH_COOLDOWN_HOURS;
-    res.json({ status, lastRefresh: last, canRefresh, hoursUntilNext: canRefresh ? 0 : Math.ceil(PRICE_REFRESH_COOLDOWN_HOURS - hoursAgo), summary: summary ? JSON.parse(summary) : null });
+    res.json({ status, lastRefresh: last, canRefresh, hoursUntilNext: canRefresh ? 0 : Math.ceil(PRICE_REFRESH_COOLDOWN_HOURS - hoursAgo), summary: summary ? JSON.parse(summary) : null, progress: progress ? JSON.parse(progress) : null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -937,9 +948,13 @@ async function runPriceRefresh() {
   const vendors = await db.prepare('SELECT * FROM vendors ORDER BY name').all();
   const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   let updated = 0, failed = 0, skipped = 0;
+  const total = ingredients.length * vendors.length;
+  let current = 0;
 
   for (const ingredient of ingredients) {
     for (const vendor of vendors) {
+      current++;
+      await setSetting('price_refresh_progress', JSON.stringify({ current, total, ingredient: ingredient.name, vendor: vendor.name }));
       try {
         // Use site: search when vendor has a website (finds real product pages), else fall back to name search
         const searchQuery = vendor.website
@@ -982,6 +997,7 @@ async function runPriceRefresh() {
 
   await setSetting('last_price_refresh', new Date().toISOString());
   await setSetting('price_refresh_status', 'done');
+  await setSetting('price_refresh_progress', null);
   await setSetting('price_refresh_summary', JSON.stringify({ updated, failed, skipped, total: ingredients.length * vendors.length }));
 }
 

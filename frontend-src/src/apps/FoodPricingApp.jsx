@@ -784,8 +784,11 @@ function PricesTab({ ingredients, setIngredients, vendors, API, user }) {
   const [editing, setEditing] = useState(null)
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
-  const [refreshStatus, setRefreshStatus] = useState({ status: 'idle', canRefresh: true, hoursUntilNext: 0, lastRefresh: null, summary: null })
+  const [refreshStatus, setRefreshStatus] = useState({ status: 'idle', canRefresh: true, hoursUntilNext: 0, lastRefresh: null, summary: null, progress: null })
   const [refreshError, setRefreshError] = useState('')
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [preview, setPreview] = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
   const pollRef = useRef(null)
 
   // Load refresh status on mount
@@ -816,7 +819,23 @@ function PricesTab({ ingredients, setIngredients, vendors, API, user }) {
     return () => clearInterval(pollRef.current)
   }, [refreshStatus.status, API, setIngredients])
 
-  const handleRefresh = async () => {
+  const handleRefreshClick = async () => {
+    setRefreshError('')
+    setPreviewLoading(true)
+    setShowConfirm(true)
+    try {
+      const res = await fetch(`${API}/ingredients/refresh-preview`, { credentials: 'include' })
+      const data = await res.json()
+      setPreview(data)
+    } catch (err) {
+      setPreview(null)
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const handleRefreshConfirm = async () => {
+    setShowConfirm(false)
     setRefreshError('')
     try {
       const res = await fetch(`${API}/ingredients/refresh-prices?force=true`, { method: 'POST', credentials: 'include' })
@@ -876,7 +895,7 @@ function PricesTab({ ingredients, setIngredients, vendors, API, user }) {
           <>
             <button
               className="btn btn-secondary btn-sm"
-              onClick={handleRefresh}
+              onClick={handleRefreshClick}
               disabled={refreshStatus.status === 'running'}
               title={refreshStatus.lastRefresh ? `Last refreshed ${formatLastRefresh(refreshStatus.lastRefresh)} — click to refresh again` : 'Fetch current prices from web for all ingredients & vendors'}
               style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}
@@ -900,7 +919,53 @@ function PricesTab({ ingredients, setIngredients, vendors, API, user }) {
       )}
       {refreshStatus.status === 'running' && (
         <div style={{ background: '#EFF6FF', borderLeft: '4px solid #3B82F6', color: '#1D4ED8', padding: '0.625rem 1rem', borderRadius: 'var(--radius-sm)', marginBottom: '0.75rem', fontSize: '0.8125rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Fetching prices for all ingredients and vendors — this takes a minute…
+          <div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
+          {refreshStatus.progress
+            ? <span>Fetching prices… <strong>{refreshStatus.progress.current}</strong> of <strong>{refreshStatus.progress.total}</strong> — checking <em>{refreshStatus.progress.ingredient}</em> @ <em>{refreshStatus.progress.vendor}</em></span>
+            : <span>Fetching prices for all ingredients and vendors — this takes a minute…</span>
+          }
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {showConfirm && (
+        <div className="modal-overlay" onClick={() => setShowConfirm(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <div className="modal-header">
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <TrendingDown size={18} style={{ color: 'var(--plum)' }} /> Refresh Prices
+              </h2>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowConfirm(false)}><X size={16} /></button>
+            </div>
+            <div className="modal-body">
+              {previewLoading ? (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '2rem' }}><div className="spinner" /></div>
+              ) : preview ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div style={{ background: 'var(--surface)', borderRadius: 'var(--radius-sm)', padding: '1rem', fontSize: '0.875rem', lineHeight: 1.6 }}>
+                    <p style={{ margin: 0 }}>This will search the web and use AI to find current prices for:</p>
+                    <ul style={{ margin: '0.75rem 0 0', paddingLeft: '1.25rem' }}>
+                      <li><strong>{preview.ingredients}</strong> ingredient{preview.ingredients !== 1 ? 's' : ''}</li>
+                      <li><strong>{preview.vendors}</strong> vendor{preview.vendors !== 1 ? 's' : ''}</li>
+                      <li><strong>{preview.totalCalls}</strong> total lookups</li>
+                      <li>~<strong>{preview.estSeconds < 60 ? `${preview.estSeconds}s` : `${Math.round(preview.estSeconds / 60)} min`}</strong> estimated time</li>
+                    </ul>
+                  </div>
+                  <div style={{ background: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: 'var(--radius-sm)', padding: '0.75rem 1rem', fontSize: '0.8125rem', color: '#92400E' }}>
+                    ⚠️ Uses <strong>{preview.totalCalls}</strong> Brave Search API calls (2,000/month free tier). Don't run this more than necessary.
+                  </div>
+                </div>
+              ) : (
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Could not load preview. Proceed anyway?</p>
+              )}
+            </div>
+            <div className="modal-footer" style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary" onClick={() => setShowConfirm(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleRefreshConfirm} disabled={previewLoading}>
+                <TrendingDown size={14} /> Start Refresh
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {refreshStatus.status === 'done' && refreshStatus.summary && (
