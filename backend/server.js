@@ -924,6 +924,14 @@ app.get('/api/ingredients/refresh-status', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/ingredients/refresh-prices/reset', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    await setSetting('price_refresh_status', 'idle');
+    await setSetting('price_refresh_progress', null);
+    res.json({ ok: true, message: 'Price refresh status reset to idle.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/ingredients/refresh-prices', requireAuth, requireAdmin, async (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: 'ANTHROPIC_API_KEY not set in Railway env vars.' });
   if (!process.env.BRAVE_SEARCH_API_KEY) return res.status(503).json({ error: 'BRAVE_SEARCH_API_KEY not set in Railway env vars.' });
@@ -1266,5 +1274,17 @@ app.get('/qbo-callback', (req, res) => {
 if (fs.existsSync(FRONTEND_BUILD)) {
   app.get('*', (req, res) => res.sendFile(path.join(FRONTEND_BUILD, 'index.html')));
 }
+
+// On startup: if a price refresh was interrupted (server restart mid-run), reset to idle
+(async () => {
+  try {
+    const status = await getSetting('price_refresh_status');
+    if (status === 'running') {
+      await setSetting('price_refresh_status', 'idle');
+      await setSetting('price_refresh_progress', null);
+      console.log('[startup] Stale price_refresh_status reset from running → idle');
+    }
+  } catch (e) { console.error('[startup] Could not reset price_refresh_status:', e.message); }
+})();
 
 app.listen(PORT, () => console.log(`OMH Portal running on port ${PORT}`));

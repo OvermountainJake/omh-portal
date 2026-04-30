@@ -903,6 +903,20 @@ function PricesTab({ ingredients, setIngredients, vendors, API, user }) {
               <TrendingDown size={14} />
               {refreshStatus.status === 'running' ? 'Refreshing…' : 'Refresh Prices'}
             </button>
+            {refreshStatus.status === 'running' && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={async () => {
+                  if (!confirm('Force-reset the stuck price refresh? This will mark it as idle so you can try again.')) return;
+                  await fetch(`${API}/ingredients/refresh-prices/reset`, { method: 'POST', credentials: 'include' });
+                  setRefreshStatus(s => ({ ...s, status: 'idle', progress: null }));
+                }}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', color: '#B45309' }}
+                title="Force-reset a stuck refresh"
+              >
+                ✕ Unstick
+              </button>
+            )}
             <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>
               <Plus size={14} /> Add Ingredient
             </button>
